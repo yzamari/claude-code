@@ -279,3 +279,4 @@ export function registerMcpAddCommand(mcp: Command): void {
     })
 }
 
+

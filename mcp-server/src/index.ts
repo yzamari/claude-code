@@ -22,12 +22,6 @@ main().catch((err) => {
   console.error("Fatal error:", err);
   process.exit(1);
 });
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-async function dirExists(p: string): Promise<boolean> {
   try {
     return (await fs.stat(p)).isDirectory();
   } catch {
@@ -983,4 +977,5 @@ main().catch((err) => {
   console.error("Fatal error:", err);
   process.exit(1);
 });
+
 

@@ -79,3 +79,4 @@ function isMalformedBase64Image(
   return !(block.source as unknown as Record<string, unknown>).media_type
 }
 
+

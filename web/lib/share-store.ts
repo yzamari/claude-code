@@ -4,7 +4,37 @@
  * Module-level singleton persists for the duration of the Node.js process.
  */
 
+import { scryptSync, randomBytes, timingSafeEqual } from "crypto";
 import type { Conversation } from "./types";
+
+// ---------------------------------------------------------------------------
+// Password hashing (scrypt + timing-safe compare)
+// ---------------------------------------------------------------------------
+
+const SCRYPT_SALT_BYTES = 16;
+const SCRYPT_KEY_BYTES = 64;
+const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 };
+
+function hashPassword(password: string): string {
+  const salt = randomBytes(SCRYPT_SALT_BYTES).toString("hex");
+  const hash = scryptSync(password, salt, SCRYPT_KEY_BYTES, SCRYPT_PARAMS).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password: string, storedHash: string): boolean {
+  const colonIdx = storedHash.indexOf(":");
+  if (colonIdx === -1) return false;
+  const salt = storedHash.slice(0, colonIdx);
+  const hash = storedHash.slice(colonIdx + 1);
+  try {
+    const derived = scryptSync(password, salt, SCRYPT_KEY_BYTES, SCRYPT_PARAMS);
+    const stored = Buffer.from(hash, "hex");
+    // Constant-time comparison prevents timing attacks
+    return derived.length === stored.length && timingSafeEqual(derived, stored);
+  } catch {
+    return false;
+  }
+}
 
 export type ShareVisibility = "public" | "unlisted" | "password";
 export type ShareExpiry = "1h" | "24h" | "7d" | "30d" | "never";
@@ -14,7 +44,8 @@ export interface StoredShare {
   conversationId: string;
   conversation: Conversation;
   visibility: ShareVisibility;
-  passwordHash?: string; // bcrypt-style hash; plain comparison used here for simplicity
+  /** scrypt hash of the password in "salt:hash" format (hex-encoded) */
+  passwordHash?: string;
   expiry: ShareExpiry;
   expiresAt?: number;
   createdAt: number;
@@ -48,7 +79,7 @@ export function createShare(
     conversationId: params.conversation.id,
     conversation: params.conversation,
     visibility: params.visibility,
-    passwordHash: params.password ?? undefined,
+    passwordHash: params.password ? hashPassword(params.password) : undefined,
     expiry: params.expiry,
     expiresAt: expiryMs !== null ? now + expiryMs : undefined,
     createdAt: now,
@@ -73,8 +104,8 @@ export function getShare(shareId: string): StoredShare | null {
 
 export function verifySharePassword(shareId: string, password: string): boolean {
   const entry = store.get(shareId);
-  if (!entry || entry.visibility !== "password") return false;
-  return entry.passwordHash === password;
+  if (!entry || entry.visibility !== "password" || !entry.passwordHash) return false;
+  return verifyPassword(password, entry.passwordHash);
 }
 
 export function revokeShare(shareId: string): boolean {

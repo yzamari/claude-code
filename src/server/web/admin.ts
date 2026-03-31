@@ -1,4 +1,4 @@
-import { Router } from "express";
+import express from "express";
 import { join } from "path";
 import { readFileSync } from "fs";
 import type { Request, Response } from "express";
@@ -26,8 +26,8 @@ function requireAdmin(req: Request, res: Response, next: () => void): void {
 export function createAdminRouter(
   sessionManager: SessionManager,
   userStore: UserStore,
-): Router {
-  const router = Router();
+) {
+  const router = express.Router();
 
   // All admin routes require admin role.
   router.use(requireAdmin);
@@ -53,11 +53,10 @@ export function createAdminRouter(
    */
   router.get("/sessions", (_req, res) => {
     const sessions = sessionManager.getAllSessions().map((s) => ({
-      id: s.token,
+      id: s.id,
       userId: s.userId,
-      createdAt: s.created,
-      ageMs: Date.now() - new Date(s.created).getTime(),
-      alive: s.alive,
+      createdAt: s.createdAt,
+      ageMs: Date.now() - s.createdAt,
     }));
     res.json({ sessions });
   });

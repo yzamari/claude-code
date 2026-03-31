@@ -12,6 +12,12 @@ export interface ToolUseContent {
   id: string;
   name: string;
   input: Record<string, unknown>;
+  // UI-only fields: track execution state without a separate lookup
+  result?: string;
+  is_error?: boolean;
+  is_running?: boolean;
+  started_at?: number;
+  completed_at?: number;
 }
 
 export interface ToolResultContent {
@@ -108,6 +114,21 @@ export interface MCPServerConfig {
   enabled: boolean;
 }
 
+export type TerminalTheme =
+  | "tokyo-night"
+  | "dracula"
+  | "solarized-dark"
+  | "monokai"
+  | "green-screen"
+  | "amber";
+
+export interface TerminalEffects {
+  scanlines: boolean;
+  glow: boolean;
+  curvature: boolean;
+  flicker: boolean;
+}
+
 export interface AppSettings {
   // General
   theme: "light" | "dark" | "system";
@@ -115,6 +136,10 @@ export interface AppSettings {
   sendOnEnter: boolean;
   showTimestamps: boolean;
   compactMode: boolean;
+
+  // Terminal aesthetic
+  terminalTheme: TerminalTheme;
+  terminalEffects: TerminalEffects;
 
   // Model
   model: string;

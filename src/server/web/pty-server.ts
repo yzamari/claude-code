@@ -9,11 +9,31 @@ import { ConnectionRateLimiter } from "./auth.js";
 import { SessionManager } from "./session-manager.js";
 import { UserStore } from "./user-store.js";
 import { createAdminRouter } from "./admin.js";
+import { createAnalyticsRouter } from "../analytics/router.js";
 import { SessionStore } from "./auth/adapter.js";
 import { TokenAuthAdapter } from "./auth/token-auth.js";
 import { OAuthAdapter } from "./auth/oauth-auth.js";
 import { ApiKeyAdapter } from "./auth/apikey-auth.js";
 import type { AuthAdapter, AuthUser } from "./auth/adapter.js";
+import { initSentry, sentryErrorHandler, sentryUserMiddleware } from "../observability/sentry.js";
+import { logger, requestLoggingMiddleware } from "../observability/logger.js";
+import {
+  metricsMiddleware,
+  metricsHandler,
+  activeSessions,
+  conversationsCreatedTotal,
+  startEventLoopSampler,
+} from "../observability/metrics.js";
+import {
+  livenessHandler,
+  readinessHandler,
+  startupHandler,
+  markStartupComplete,
+  registerAnthropicCheck,
+} from "../observability/health.js";
+
+// Initialise Sentry before anything else so it catches startup errors.
+initSentry();
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -52,11 +72,18 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+// Observability middleware — mount first so every request is timed and logged.
+app.use(metricsMiddleware);
+app.use(requestLoggingMiddleware);
+
 const server = createServer(app);
 
 // Register auth routes (login, callback, logout) before static files so they
 // take priority over any index.html fallback.
 authAdapter.setupRoutes(app);
+
+// Sentry user context — enriches error reports with the authenticated user.
+app.use(sentryUserMiddleware as express.RequestHandler);
 
 // ── User store ────────────────────────────────────────────────────────────────
 
@@ -101,16 +128,28 @@ const sessionManager = new SessionManager(
   MAX_SESSIONS_PER_HOUR,
 );
 
-// ── HTTP routes ───────────────────────────────────────────────────────────────
+// ── Health checks ─────────────────────────────────────────────────────────────
 
-app.get("/health", (_req, res) => {
-  res.json({
-    status: "ok",
-    activeSessions: sessionManager.activeCount,
-    maxSessions: MAX_SESSIONS,
-    authProvider: AUTH_PROVIDER,
-  });
-});
+// Register the Anthropic API reachability check.
+registerAnthropicCheck();
+
+// Liveness — is the process alive?
+app.get("/health", livenessHandler);
+app.get("/health/live", livenessHandler);
+
+// Readiness — can it serve traffic? (runs all registered checks)
+app.get("/health/ready", readinessHandler as express.RequestHandler);
+
+// Startup — did initialisation finish? (used by K8s startupProbe)
+app.get("/health/startup", startupHandler);
+
+// ── Metrics ───────────────────────────────────────────────────────────────────
+
+// Prometheus scrape endpoint — protected to localhost-only in production via
+// network policy / ingress rules; no auth here to keep Prometheus config simple.
+app.get("/metrics", metricsHandler as express.RequestHandler);
+
+// ── API routes ────────────────────────────────────────────────────────────────
 
 /**
  * GET /api/sessions — list the current user's sessions.
@@ -158,6 +197,9 @@ app.use(
   createAdminRouter(sessionManager, userStore),
 );
 
+// Analytics routes — ingest is public (events are anonymous); summary/export are admin-only.
+app.use("/analytics", createAnalyticsRouter());
+
 // Static frontend (served last so auth/admin routes win).
 const publicDir = path.join(import.meta.dirname, "public");
 app.use(express.static(publicDir));
@@ -165,6 +207,9 @@ app.use(express.static(publicDir));
 app.get("/", authAdapter.requireAuth.bind(authAdapter), (_req, res) => {
   res.sendFile(path.join(publicDir, "index.html"));
 });
+
+// Sentry error handler — must be last, after all routes.
+app.use(sentryErrorHandler as express.ErrorRequestHandler);
 
 // ── WebSocket server ──────────────────────────────────────────────────────────
 
@@ -185,7 +230,7 @@ const wss = new WebSocketServer({
   verifyClient: ({ req, origin }, callback) => {
     // Origin check
     if (ALLOWED_ORIGINS.length > 0 && !ALLOWED_ORIGINS.includes(origin)) {
-      console.warn(`Rejected connection from origin: ${origin}`);
+      logger.warn({ origin }, "Rejected connection from disallowed origin");
       callback(false, 403, "Forbidden origin");
       return;
     }
@@ -193,7 +238,7 @@ const wss = new WebSocketServer({
     // Authenticate the user
     const user = authAdapter.authenticate(req as IncomingMessage);
     if (!user) {
-      console.warn("Rejected WebSocket connection: unauthenticated");
+      logger.warn("Rejected WebSocket connection: unauthenticated");
       callback(false, 401, "Unauthorized");
       return;
     }
@@ -204,24 +249,31 @@ const wss = new WebSocketServer({
       req.socket.remoteAddress ??
       "unknown";
     if (!rateLimiter.allow(ip)) {
-      console.warn(`Rate limited connection from ${ip}`);
+      logger.warn({ ip }, "Rate limited WebSocket connection");
       callback(false, 429, "Too many connections");
       return;
     }
 
-    // Per-user rate limit (hourly new-session quota)
-    if (sessionManager.isUserRateLimited(user.id)) {
-      const retryAfter = sessionManager.retryAfterSeconds(user.id);
-      console.warn(`Per-user rate limit for ${user.id}`);
-      callback(false, 429, "Too Many Requests", { "Retry-After": String(retryAfter) });
-      return;
-    }
+    // Determine whether this is a resume (reattach) request.
+    // Rate limits only apply to new session creation, not resumes.
+    const wsUrl = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    const isResume = wsUrl.searchParams.has("resume");
 
-    // Per-user concurrent session limit
-    if (sessionManager.isUserAtConcurrentLimit(user.id)) {
-      console.warn(`Concurrent session limit reached for ${user.id}`);
-      callback(false, 429, "Session limit reached");
-      return;
+    if (!isResume) {
+      // Per-user rate limit (hourly new-session quota)
+      if (sessionManager.isUserRateLimited(user.id)) {
+        const retryAfter = sessionManager.retryAfterSeconds(user.id);
+        logger.warn({ userId: user.id, retryAfter }, "Per-user rate limit reached");
+        callback(false, 429, "Too Many Requests", { "Retry-After": String(retryAfter) });
+        return;
+      }
+
+      // Per-user concurrent session limit
+      if (sessionManager.isUserAtConcurrentLimit(user.id)) {
+        logger.warn({ userId: user.id }, "Concurrent session limit reached");
+        callback(false, 429, "Session limit reached");
+        return;
+      }
     }
 
     // Attach user to request for the connection handler
@@ -242,7 +294,7 @@ wss.on("connection", (ws, req) => {
     (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ??
     req.socket.remoteAddress ??
     "unknown";
-  console.log(`New WebSocket connection from ${ip} (user: ${user.id})`);
+  logger.info({ ip, userId: user.id }, "New WebSocket connection");
 
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   const cols = parseInt(url.searchParams.get("cols") ?? "80", 10);
@@ -255,10 +307,14 @@ wss.on("connection", (ws, req) => {
     // Users may only resume their own sessions (admins can resume any)
     if (stored && (user.isAdmin || stored.userId === user.id)) {
       const resumed = sessionManager.resume(resumeToken, ws, cols, rows);
-      if (resumed) return;
+      if (resumed) {
+        activeSessions.set(sessionManager.activeCount);
+        return;
+      }
     }
-    console.log(
-      `[resume] Session ${resumeToken.slice(0, 8)}… not found or not owned — starting fresh`,
+    logger.info(
+      { tokenPrefix: resumeToken.slice(0, 8) },
+      "Resume token not found or not owned — starting fresh",
     );
   }
 
@@ -271,13 +327,19 @@ wss.on("connection", (ws, req) => {
 
   const token = sessionManager.create(ws, cols, rows, user);
   if (token) {
+    conversationsCreatedTotal.inc();
+    activeSessions.set(sessionManager.activeCount);
+
     // Track the user in the user store
     userStore.touch(user.id, { email: user.email, name: user.name });
 
     // Release the user slot when this session ends
     const stored = sessionManager.getSession(token);
     if (stored) {
-      stored.pty.onExit(() => userStore.release(user.id));
+      stored.pty.onExit(() => {
+        userStore.release(user.id);
+        activeSessions.set(sessionManager.activeCount);
+      });
     }
 
     ws.send(JSON.stringify({ type: "session", token }));
@@ -287,18 +349,18 @@ wss.on("connection", (ws, req) => {
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
 
 function shutdown() {
-  console.log("Shutting down...");
+  logger.info("Shutting down...");
   clearInterval(rateLimiterCleanup);
   sessionManager.destroyAll();
   wss.close(() => {
     server.close(() => {
-      console.log("Server closed.");
+      logger.info("Server closed.");
       process.exit(0);
     });
   });
 
   setTimeout(() => {
-    console.error("Forced shutdown after timeout");
+    logger.error("Forced shutdown after timeout");
     process.exit(1);
   }, 10_000);
 }
@@ -308,19 +370,25 @@ process.on("SIGINT", shutdown);
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 
+// Start background samplers
+startEventLoopSampler();
+
 server.listen(PORT, HOST, () => {
-  console.log(`PTY server listening on http://${HOST}:${PORT}`);
-  console.log(`  WebSocket: ws://${HOST}:${PORT}/ws`);
-  console.log(`  Max sessions: ${MAX_SESSIONS} (${MAX_SESSIONS_PER_USER} per user)`);
-  console.log(`  Session grace period: ${GRACE_PERIOD_MS / 1000}s`);
-  console.log(`  Scrollback buffer: ${Math.round(SCROLLBACK_BYTES / 1024)}KB per session`);
-  console.log(`  Auth provider: ${AUTH_PROVIDER}`);
-  if (AUTH_PROVIDER === "token" && process.env.AUTH_TOKEN) {
-    console.log("  Auth: token required");
-  }
-  if (process.env.ADMIN_USERS) {
-    console.log(`  Admins: ${process.env.ADMIN_USERS}`);
-  }
+  logger.info(
+    {
+      host: HOST,
+      port: PORT,
+      maxSessions: MAX_SESSIONS,
+      maxSessionsPerUser: MAX_SESSIONS_PER_USER,
+      gracePeriodSecs: GRACE_PERIOD_MS / 1000,
+      scrollbackKb: Math.round(SCROLLBACK_BYTES / 1024),
+      authProvider: AUTH_PROVIDER,
+    },
+    `PTY server listening on http://${HOST}:${PORT}`,
+  );
+
+  // Signal to K8s startup probe that the server is ready.
+  markStartupComplete(true);
 });
 
 export { app, server, sessionManager, wss };

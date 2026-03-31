@@ -1,13 +1,11 @@
 "use client";
 
-import { createContext, useContext, useRef, useMemo } from "react";
+import { createContext, useContext, useMemo } from "react";
 import { useCollaboration } from "@/hooks/useCollaboration";
 import { usePresence } from "@/hooks/usePresence";
-import { CollabSocket } from "@/lib/collaboration/socket";
 import type { CollabUser, CollabRole } from "@/lib/collaboration/socket";
-import type { CollabAnnotation, PendingToolUse } from "@/lib/collaboration/types";
+import type { CollabAnnotation, PendingToolUse, LinkExpiry, ShareLink } from "@/lib/collaboration/types";
 import type { PresenceState } from "@/lib/collaboration/presence";
-import type { LinkExpiry, ShareLink } from "@/lib/collaboration/types";
 import { createShareLink } from "@/lib/collaboration/permissions";
 
 // ─── Context Shape ────────────────────────────────────────────────────────────
@@ -67,15 +65,12 @@ export function CollaborationProvider({
   wsUrl,
   children,
 }: CollaborationProviderProps) {
-  const socketRef = useRef<CollabSocket | null>(null);
-
+  // useCollaboration creates the socket synchronously (via useRef) and returns it
   const collab = useCollaboration({ sessionId, currentUser, wsUrl });
 
-  // Access the socket from the ref (set by the hook internally)
-  // Since useCollaboration creates the socket internally, we expose a proxy
-  // via the presence hook's socket param by reaching into the hook return
+  // usePresence subscribes to the same socket for presence-specific events
   const presence = usePresence({
-    socket: socketRef.current,
+    socket: collab.socket,
     sessionId,
     currentUser,
   });
@@ -118,7 +113,7 @@ export function CollaborationProvider({
   );
 }
 
-// ─── Consumer Hook ────────────────────────────────────────────────────────────
+// ─── Consumer Hooks ───────────────────────────────────────────────────────────
 
 export function useCollaborationContext(): CollaborationContextValue {
   const ctx = useContext(CollaborationContext);
@@ -132,7 +127,7 @@ export function useCollaborationContext(): CollaborationContextValue {
 
 /**
  * Returns null when there is no active collaboration session.
- * Use this in components that render outside a CollaborationProvider.
+ * Safe to call in components that render both inside and outside a session.
  */
 export function useCollaborationContextOptional(): CollaborationContextValue | null {
   return useContext(CollaborationContext);

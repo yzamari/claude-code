@@ -219,6 +219,29 @@ html, body {
   font-size: 12px;
 }
 
+/* ── Session banner ─────────────────────────────────────────────────────── */
+#session-banner {
+  position: fixed;
+  top: 48px; /* below the top bar */
+  right: 16px;
+  background: var(--bar-accent);
+  color: #fff;
+  font-size: 12px;
+  font-family: system-ui, sans-serif;
+  padding: 4px 10px;
+  border-radius: 4px;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+  z-index: 200;
+}
+
+#session-banner.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 /* ── Scrollbar ──────────────────────────────────────────────────────────── */
 .xterm-viewport::-webkit-scrollbar        { width: 8px; }
 .xterm-viewport::-webkit-scrollbar-track  { background: transparent; }

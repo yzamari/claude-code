@@ -109,9 +109,11 @@ export class SessionManager {
     }));
   }
 
-  /** Sessions owned by a specific user — used by the per-user API. */
-  getUserSessions(userId: string) {
-    return this.store.listByUser(userId);
+  /** Sessions owned by a specific user — same shape as getAllSessions(). */
+  getUserSessions(userId: string): Array<{ id: string; userId: string; createdAt: number }> {
+    return this.store.getAll()
+      .filter((s) => s.userId === userId)
+      .map((s) => ({ id: s.token, userId: s.userId, createdAt: s.createdAt.getTime() }));
   }
 
   isUserAtConcurrentLimit(userId: string): boolean {

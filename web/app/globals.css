@@ -1,3 +1,17 @@
+/* ─── Terminal aesthetic styles ───────────────────── */
+@import "../styles/terminal-colors.css";
+@import "../styles/themes/tokyo-night.css";
+@import "../styles/themes/dracula.css";
+@import "../styles/themes/solarized-dark.css";
+@import "../styles/themes/monokai.css";
+@import "../styles/themes/green-screen.css";
+@import "../styles/themes/amber.css";
+@import "../styles/terminal-base.css";
+@import "../styles/terminal-chrome.css";
+@import "../styles/terminal-borders.css";
+@import "../styles/terminal-animations.css";
+@import "../styles/terminal-effects.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -207,6 +221,60 @@
   from { transform: scaleX(1); }
   to { transform: scaleX(0); }
 }
+@keyframes streaming-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* =====================================================
+   ACCESSIBILITY — MOTION & CONTRAST
+   ===================================================== */
+
+/* Disable all transitions and animations for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Increase border/contrast for users who need it */
+@media (prefers-contrast: more) {
+  :root {
+    --color-border: #71717a;
+    --color-border-hover: #a1a1aa;
+  }
+  /* Remove backdrop transparency */
+  [class*="backdrop-blur"] {
+    backdrop-filter: none !important;
+  }
+}
+
+/* Windows High Contrast Mode */
+@media (forced-colors: active) {
+  /* Restore focus outline overridden by custom styles */
+  :focus-visible {
+    outline: 2px solid ButtonText !important;
+    outline-offset: 2px !important;
+  }
+  /* Disabled elements use system GrayText */
+  [disabled],
+  [aria-disabled="true"] {
+    color: GrayText !important;
+  }
+  /* Buttons keep their border so they remain recognisable as interactive */
+  button,
+  [role="button"],
+  [role="option"],
+  [role="tab"] {
+    forced-color-adjust: none;
+    border: 1px solid ButtonText;
+  }
+}
 
 /* =====================================================
    SCROLLBAR
@@ -224,4 +292,140 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-muted);
+}
+
+/* =====================================================
+   MOBILE / TOUCH OPTIMISATIONS
+   ===================================================== */
+
+/* Remove 300 ms tap delay on all interactive elements */
+a,
+button,
+[role="button"],
+input,
+select,
+textarea,
+label {
+  touch-action: manipulation;
+}
+
+/* Prevent accidental text selection on UI chrome while still allowing
+   selection inside message content (.selectable-text) */
+button,
+[role="button"],
+nav,
+header,
+aside {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* iOS Safari zoom prevention: keep font-size >= 16 px on form controls */
+input[type="text"],
+input[type="search"],
+input[type="email"],
+textarea,
+select {
+  font-size: max(16px, 1em);
+}
+
+/* Prevent overscroll bounce on the root (iOS rubber-banding) */
+html {
+  overscroll-behavior: none;
+}
+
+/* Safe-area inset helpers for notched devices */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* content-visibility optimisation for long message lists */
+.message-item {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 80px;
+}
+
+/* =====================================================
+   SHIKI CODE HIGHLIGHTING
+   ===================================================== */
+.shiki-container .shiki {
+  margin: 0;
+  padding: 1rem 1rem 1rem 0;
+  min-height: 100%;
+  background: transparent !important;
+  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.shiki-container .shiki code {
+  display: block;
+  counter-reset: line;
+}
+
+.shiki-container .shiki .line {
+  display: inline-block;
+  width: 100%;
+  padding-right: 1rem;
+  min-height: 1.6em;
+}
+
+.shiki-container.show-line-numbers .shiki .line::before {
+  counter-increment: line;
+  content: counter(line);
+  display: inline-block;
+  width: 2.5rem;
+  padding-right: 1rem;
+  text-align: right;
+  color: #4b5263;
+  user-select: none;
+  border-right: 1px solid #2c313a;
+  margin-right: 1rem;
+  font-size: 12px;
+}
+
+.shiki-container.word-wrap-code .shiki {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.shiki-container .shiki .line.line-highlighted {
+  background: rgba(139, 92, 246, 0.15);
+  outline: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+/* =====================================================
+   SEARCH HIGHLIGHTS
+   ===================================================== */
+mark.search-highlight {
+  background: rgba(255, 200, 0, 0.3);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+mark.search-highlight-current {
+  background: rgba(255, 150, 0, 0.55);
+  color: inherit;
+  border-radius: 2px;
+  outline: 1px solid rgba(255, 150, 0, 0.8);
+}
+
+/* =====================================================
+   CODEMIRROR OVERRIDES
+   ===================================================== */
+.cm-editor {
+  height: 100%;
+  font-size: 13px;
+}
+
+.cm-scroller {
+  font-family: var(--font-jetbrains-mono), ui-monospace, monospace !important;
+}
+
+.cm-focused {
+  outline: none !important;
 }

@@ -34,9 +34,16 @@ interface VirtualMessageListProps {
   /** Whether streaming is in progress — suppresses smooth-scroll so the
    *  autoscroll keeps up with incoming tokens. */
   isStreaming: boolean;
+  conversationId?: string;
+  onScrollStateChange?: (isAtBottom: boolean, scrollToBottom: () => void) => void;
 }
 
-export function VirtualMessageList({ messages, isStreaming }: VirtualMessageListProps) {
+export function VirtualMessageList({
+  messages,
+  isStreaming,
+  conversationId,
+  onScrollStateChange,
+}: VirtualMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
 
@@ -47,13 +54,22 @@ export function VirtualMessageList({ messages, isStreaming }: VirtualMessageList
     overscan: 5,
   });
 
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, []);
+
   // Track whether the user has scrolled away from the bottom
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    isAtBottomRef.current = distanceFromBottom < 80;
-  }, []);
+    const atBottom = distanceFromBottom < 80;
+    if (atBottom !== isAtBottomRef.current) {
+      isAtBottomRef.current = atBottom;
+      onScrollStateChange?.(atBottom, scrollToBottom);
+    }
+  }, [onScrollStateChange, scrollToBottom]);
 
   // Auto-scroll to bottom when new messages arrive (if already at bottom)
   useEffect(() => {
@@ -104,7 +120,7 @@ export function VirtualMessageList({ messages, isStreaming }: VirtualMessageList
               }}
               className="pb-6"
             >
-              <MessageBubble message={message} />
+              <MessageBubble message={message} conversationId={conversationId} />
             </div>
           );
         })}

@@ -8,6 +8,11 @@
 import '../src/shims/macro.js'
 
 async function main() {
+  // Enable config access — must happen before getCommands() which calls COMMANDS()
+  // which invokes command factories that read config/auth state.
+  const { enableConfigs } = await import('../src/utils/config.js')
+  enableConfigs()
+
   const { getCommands } = await import('../src/commands.js')
 
   const cwd = process.cwd()
@@ -34,17 +39,23 @@ async function main() {
     console.log()
   }
 
-  // Verify essential commands are present
-  const essential = ['help', 'config', 'init', 'commit', 'review']
+  // Verify essential commands are present.
+  // Note: 'commit' is in INTERNAL_ONLY_COMMANDS — only visible when USER_TYPE=ant.
+  const essential = ['help', 'config', 'init', 'review']
+  const antOnly = ['commit'] // gated behind USER_TYPE=ant
   const commandNames = new Set(commands.map(c => c.name))
-  const missing = essential.filter(n => !commandNames.has(n))
 
+  const missing = essential.filter(n => !commandNames.has(n))
   if (missing.length > 0) {
     console.error(`❌ Missing essential commands: ${missing.join(', ')}`)
     process.exit(1)
   }
-
   console.log(`✅ All ${essential.length} essential commands present: ${essential.join(', ')}`)
+
+  const presentAntOnly = antOnly.filter(n => commandNames.has(n))
+  const missingAntOnly = antOnly.filter(n => !commandNames.has(n))
+  if (presentAntOnly.length > 0) console.log(`✅ Internal-only commands present (USER_TYPE=ant): ${presentAntOnly.join(', ')}`)
+  if (missingAntOnly.length > 0) console.log(`ℹ  Internal-only commands absent (expected without USER_TYPE=ant): ${missingAntOnly.join(', ')}`)
 
   // Check moved-to-plugin commands
   const movedToPlugin = commands.filter(

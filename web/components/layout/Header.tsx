@@ -6,6 +6,8 @@ import { useChatStore } from "@/lib/store";
 import { MODELS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { NotificationCenter } from "@/components/notifications/NotificationCenter";
+import { PresenceAvatars } from "@/components/collaboration/PresenceAvatars";
+import { ShareDialog } from "@/components/collaboration/ShareDialog";
 
 export function Header() {
   const { theme, setTheme } = useTheme();
@@ -27,6 +29,12 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-2">
+        {/* Presence avatars — only visible when inside a CollaborationProvider */}
+        <PresenceAvatars />
+
+        {/* Share button — only visible when inside a CollaborationProvider */}
+        <ShareDialog />
+
         {/* Model selector */}
         <label htmlFor="model-select" className="sr-only">
           Model

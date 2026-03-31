@@ -12,6 +12,15 @@ const DEFAULT_SETTINGS: AppSettings = {
   showTimestamps: false,
   compactMode: false,
 
+  // Terminal aesthetic
+  terminalTheme: "tokyo-night",
+  terminalEffects: {
+    scanlines: false,
+    glow: false,
+    curvature: false,
+    flicker: false,
+  },
+
   // Model
   model: DEFAULT_MODEL,
   maxTokens: 8096,
@@ -102,6 +111,10 @@ interface ChatState {
   addRecentSearch: (query: string) => void;
   clearRecentSearches: () => void;
 
+  // Transient input state (not persisted)
+  draftInput: string;
+  setDraftInput: (text: string) => void;
+
   // Settings actions
   updateSettings: (settings: Partial<AppSettings>) => void;
   resetSettings: (section?: string) => void;
@@ -115,6 +128,8 @@ interface ChatState {
   pinConversation: (id: string) => void;
   setSearchQuery: (q: string) => void;
 }
+
+export type UseChatStore = typeof useChatStore;
 
 export const useChatStore = create<ChatState>()(
   persist(
@@ -135,6 +150,9 @@ export const useChatStore = create<ChatState>()(
 
       recentSearches: [],
       tags: [],
+
+      draftInput: "",
+      setDraftInput: (text) => set({ draftInput: text }),
 
       createConversation: () => {
         const id = nanoid();
@@ -219,6 +237,16 @@ export const useChatStore = create<ChatState>()(
                   ),
                   updatedAt: Date.now(),
                 }
+              : c
+          ),
+        }));
+      },
+
+      truncateMessages: (conversationId, keepCount) => {
+        set((state) => ({
+          conversations: state.conversations.map((c) =>
+            c.id === conversationId
+              ? { ...c, messages: c.messages.slice(0, keepCount), updatedAt: Date.now() }
               : c
           ),
         }));

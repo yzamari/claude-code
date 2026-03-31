@@ -45,8 +45,10 @@ export function CommandPaletteItem({
 
   return (
     <div
+      id={`cmd-option-${command.id}`}
       role="option"
       aria-selected={isActive}
+      aria-label={command.description ? `${command.label}: ${command.description}` : command.label}
       onClick={onSelect}
       onMouseEnter={onHighlight}
       className={cn(

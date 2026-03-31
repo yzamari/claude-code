@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { useTouchGesture } from "@/hooks/useTouchGesture";
+import { useChatStore } from "@/lib/store";
 
 interface MobileSidebarProps {
   isOpen: boolean;
@@ -14,10 +15,22 @@ interface MobileSidebarProps {
  * Slide-in drawer sidebar for mobile / tablet.
  * - Opens from the left as an overlay
  * - Swipe left or tap backdrop to close
- * - Traps focus while open and restores on close
- * - Locks body scroll while open
+ * - Auto-closes when the active conversation changes (user tapped a chat)
+ * - Traps body scroll while open
+ * - Closes on Escape key
  */
 export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
+  const { activeConversationId } = useChatStore();
+  const prevConvId = useRef(activeConversationId);
+
+  // Auto-close when the user taps a conversation in the sidebar
+  useEffect(() => {
+    if (activeConversationId !== prevConvId.current) {
+      prevConvId.current = activeConversationId;
+      if (isOpen) onClose();
+    }
+  }, [activeConversationId, isOpen, onClose]);
+
   // Swipe left on the drawer to close
   const swipeHandlers = useTouchGesture({ onSwipeLeft: onClose });
 
@@ -60,15 +73,15 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
       <div
         className={cn(
           "fixed top-0 left-0 bottom-0 z-50 w-72 lg:hidden",
-          "transition-transform duration-300 ease-in-out",
-          isOpen ? "translate-x-0" : "-translate-x-full"
+          "transition-transform duration-300 ease-in-out"
         )}
+        style={{ transform: isOpen ? "translateX(0)" : "translateX(-100%)" }}
         role="dialog"
         aria-modal="true"
         aria-label="Navigation"
         {...swipeHandlers}
       >
-        <Sidebar onNavigate={onClose} />
+        <Sidebar />
       </div>
     </>
   );

@@ -36,7 +36,11 @@ export function useCollaboration({
   currentUser,
   wsUrl,
 }: UseCollaborationOptions) {
-  const socketRef = useRef<CollabSocket | null>(null);
+  // Socket is created synchronously so it can be passed to sibling hooks
+  const socketRef = useRef<CollabSocket>(
+    new CollabSocket(sessionId, currentUser.id)
+  );
+
   const [state, setState] = useState<CollaborationState>({
     isConnected: false,
     myRole: null,
@@ -52,14 +56,12 @@ export function useCollaboration({
       : "ws://localhost:3001");
 
   useEffect(() => {
-    const socket = new CollabSocket(sessionId, currentUser.id);
-    socketRef.current = socket;
+    const socket = socketRef.current;
+    const cleanup: Array<() => void> = [];
 
     socket.onConnectionChange = (connected) => {
       setState((s) => ({ ...s, isConnected: connected }));
     };
-
-    const cleanup: Array<() => void> = [];
 
     cleanup.push(
       socket.on("session_state", (e) => {
@@ -136,13 +138,18 @@ export function useCollaboration({
     cleanup.push(
       socket.on("annotation_added", (e: AnnotationAddedEvent) => {
         const ann: CollabAnnotation = { ...e.annotation };
-        setState((s) => ({
-          ...s,
-          annotations: {
-            ...s.annotations,
-            [ann.messageId]: [...(s.annotations[ann.messageId] ?? []), ann],
-          },
-        }));
+        setState((s) => {
+          const existing = s.annotations[ann.messageId] ?? [];
+          // Skip if already added by optimistic update from this client
+          if (existing.some((a) => a.id === ann.id)) return s;
+          return {
+            ...s,
+            annotations: {
+              ...s.annotations,
+              [ann.messageId]: [...existing, ann],
+            },
+          };
+        });
       })
     );
 
@@ -165,11 +172,12 @@ export function useCollaboration({
         setState((s) => {
           const next: Record<string, CollabAnnotation[]> = {};
           for (const [msgId, anns] of Object.entries(s.annotations)) {
-            next[msgId] = anns.map((a) =>
-              a.id === e.annotationId
-                ? { ...a, replies: [...a.replies, e.reply] }
-                : a
-            );
+            next[msgId] = anns.map((a) => {
+              if (a.id !== e.annotationId) return a;
+              // Skip if already added by optimistic update
+              if (a.replies.some((r) => r.id === e.reply.id)) return a;
+              return { ...a, replies: [...a.replies, e.reply] };
+            });
           }
           return { ...s, annotations: next };
         });
@@ -182,13 +190,14 @@ export function useCollaboration({
       cleanup.forEach((off) => off());
       socket.disconnect();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, currentUser.id, effectiveWsUrl]);
 
   // ─── Actions ───────────────────────────────────────────────────────────────
 
   const approveTool = useCallback(
     (toolUseId: string) => {
-      socketRef.current?.send({
+      socketRef.current.send({
         type: "tool_use_approved",
         sessionId,
         userId: currentUser.id,
@@ -201,7 +210,7 @@ export function useCollaboration({
 
   const denyTool = useCallback(
     (toolUseId: string) => {
-      socketRef.current?.send({
+      socketRef.current.send({
         type: "tool_use_denied",
         sessionId,
         userId: currentUser.id,
@@ -232,7 +241,7 @@ export function useCollaboration({
           [messageId]: [...(s.annotations[messageId] ?? []), annotation],
         },
       }));
-      socketRef.current?.send({
+      socketRef.current.send({
         type: "annotation_added",
         sessionId,
         userId: currentUser.id,
@@ -253,7 +262,7 @@ export function useCollaboration({
         }
         return { ...s, annotations: next };
       });
-      socketRef.current?.send({
+      socketRef.current.send({
         type: "annotation_resolved",
         sessionId,
         userId: currentUser.id,
@@ -285,7 +294,7 @@ export function useCollaboration({
         }
         return { ...s, annotations: next };
       });
-      socketRef.current?.send({
+      socketRef.current.send({
         type: "annotation_reply",
         sessionId,
         userId: currentUser.id,
@@ -298,7 +307,7 @@ export function useCollaboration({
 
   const revokeAccess = useCallback(
     (targetUserId: string) => {
-      socketRef.current?.send({
+      socketRef.current.send({
         type: "access_revoked",
         sessionId,
         userId: currentUser.id,
@@ -310,7 +319,7 @@ export function useCollaboration({
 
   const changeRole = useCallback(
     (targetUserId: string, newRole: CollabRole) => {
-      socketRef.current?.send({
+      socketRef.current.send({
         type: "role_changed",
         sessionId,
         userId: currentUser.id,
@@ -323,7 +332,7 @@ export function useCollaboration({
 
   const transferOwnership = useCallback(
     (newOwnerId: string) => {
-      socketRef.current?.send({
+      socketRef.current.send({
         type: "ownership_transferred",
         sessionId,
         userId: currentUser.id,
@@ -336,6 +345,7 @@ export function useCollaboration({
 
   return {
     ...state,
+    socket: socketRef.current, // expose for sibling hooks
     approveTool,
     denyTool,
     addAnnotation,

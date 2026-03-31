@@ -1,9 +1,12 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
-import localFont from "next/font/local";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/layout/ThemeProvider";
 import { ToastProvider } from "@/components/notifications/ToastProvider";
+import { PerformanceObserverBootstrap } from "@/components/layout/PerformanceObserver";
+import { AnalyticsProvider } from "@/components/analytics/AnalyticsProvider";
+import { ConsentBanner } from "@/components/analytics/ConsentBanner";
+import { BackendProvider, ConnectionStatusBanner } from "@/lib/BackendContext";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -11,29 +14,35 @@ const inter = Inter({
   display: "swap",
 });
 
-const jetbrainsMono = localFont({
-  src: [
-    {
-      path: "../public/fonts/JetBrainsMono-Regular.woff2",
-      weight: "400",
-      style: "normal",
-    },
-    {
-      path: "../public/fonts/JetBrainsMono-Medium.woff2",
-      weight: "500",
-      style: "normal",
-    },
-  ],
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
   variable: "--font-jetbrains-mono",
   display: "swap",
-  fallback: ["ui-monospace", "SFMono-Regular", "Menlo", "Monaco", "monospace"],
 });
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#09090f" },
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+  ],
+};
 
 export const metadata: Metadata = {
   title: "Claude Code",
   description: "Claude Code — AI-powered development assistant",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Claude Code",
+  },
   icons: {
     icon: "/favicon.ico",
+    apple: [{ url: "/icons/icon-192.png", sizes: "192x192" }],
   },
 };
 
@@ -45,11 +54,18 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
       <body className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
-        <ThemeProvider>
-          <ToastProvider>
-            {children}
-          </ToastProvider>
-        </ThemeProvider>
+        <PerformanceObserverBootstrap />
+        <AnalyticsProvider>
+          <ThemeProvider>
+            <BackendProvider url={process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}>
+              <ConnectionStatusBanner />
+              <ToastProvider>
+                {children}
+                <ConsentBanner />
+              </ToastProvider>
+            </BackendProvider>
+          </ThemeProvider>
+        </AnalyticsProvider>
       </body>
     </html>
   );

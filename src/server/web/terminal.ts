@@ -4,10 +4,14 @@
  * WebSocket protocol (matches src/server/web/session-manager.ts):
  *
  *  Server → client (text, JSON):
- *    { type: "connected", sessionId: string }
+ *    { type: "session", token: string }    — new session created; token persisted in localStorage
+ *    { type: "resumed", token: string }    — existing session resumed; clear terminal before replay
  *    { type: "pong" }
  *    { type: "error", message: string }
  *    { type: "exit", exitCode: number, signal: number | undefined }
+ *
+ *  Server → client (binary):
+ *    PTY output as raw bytes (or scrollback replay on resume)
  *
  *  Server → client (text, raw):
  *    PTY output — plain string, written directly to xterm
@@ -16,6 +20,12 @@
  *    { type: "resize", cols: number, rows: number }
  *    { type: "ping" }
  *    raw terminal input string
+ *
+ *  Resume flow:
+ *    1. Client reads token from localStorage and adds ?resume=TOKEN to WS URL
+ *    2. Server sends { type: "resumed", token } then replays scrollback buffer as binary
+ *    3. Client clears terminal and writes replayed bytes, then continues live streaming
+ *    4. On PTY exit: client removes token from localStorage
  */
 
 import { Terminal } from '@xterm/xterm'
@@ -30,7 +40,8 @@ import './styles.css'
 // ── Types ────────────────────────────────────────────────────────────────────
 
 type ServerMessage =
-  | { type: 'connected'; sessionId: string }
+  | { type: 'session'; token: string }
+  | { type: 'resumed'; token: string }
   | { type: 'pong' }
   | { type: 'error'; message: string }
   | { type: 'exit'; exitCode: number; signal?: number }
@@ -40,6 +51,7 @@ type ServerMessage =
 const RECONNECT_BASE_MS = 1_000
 const RECONNECT_MAX_MS = 30_000
 const PING_INTERVAL_MS = 5_000
+const SESSION_TOKEN_KEY = 'claude-session-token'
 
 // ── State ────────────────────────────────────────────────────────────────────
 
@@ -60,6 +72,7 @@ const reconnectOverlay = document.getElementById('reconnect-overlay')!
 const reconnectSub = document.getElementById('reconnect-sub')!
 const statusDot = document.getElementById('status-dot')!
 const latencyEl = document.getElementById('latency')!
+const sessionBanner = document.getElementById('session-banner') as HTMLElement | null
 const barBtn = document.getElementById('bar-btn') as HTMLButtonElement
 const topBar = document.getElementById('top-bar')!
 const toggleBarBtn = document.getElementById('toggle-bar') as HTMLButtonElement
@@ -196,9 +209,15 @@ function getWsUrl(): string {
     localStorage.setItem('claude-terminal-token', token)
   }
 
-  // Pass current terminal dimensions so the PTY is spawned at the right size
+  // Pass current terminal dimensions so the PTY is spawned/resized at the right size
   url.searchParams.set('cols', String(term.cols))
   url.searchParams.set('rows', String(term.rows))
+
+  // Session resume token — if present the server will reattach to the existing PTY
+  const sessionToken = localStorage.getItem(SESSION_TOKEN_KEY)
+  if (sessionToken) {
+    url.searchParams.set('resume', sessionToken)
+  }
 
   return url.toString()
 }
@@ -224,9 +243,13 @@ function connect(): void {
     startPing()
   })
 
-  ws.addEventListener('message', ({ data }: MessageEvent<string>) => {
-    // All messages from the server are strings.
-    // Try JSON control message first; fall back to raw PTY output.
+  ws.addEventListener('message', ({ data }: MessageEvent<string | ArrayBuffer>) => {
+    if (data instanceof ArrayBuffer) {
+      // Binary frame: raw PTY bytes or scrollback replay
+      term.write(new Uint8Array(data))
+      return
+    }
+    // Text frame: try JSON control message first, then raw PTY output
     if (data.startsWith('{')) {
       try {
         handleControlMessage(JSON.parse(data) as ServerMessage)
@@ -246,8 +269,18 @@ function connect(): void {
 
 function handleControlMessage(msg: ServerMessage): void {
   switch (msg.type) {
-    case 'connected':
-      // Session established — nothing extra needed
+    case 'session':
+      // New session created — store the token so we can resume on reconnect
+      localStorage.setItem(SESSION_TOKEN_KEY, msg.token)
+      term.clear()
+      showSessionBanner('New session')
+      break
+
+    case 'resumed':
+      // Existing PTY reattached — clear the terminal before scrollback replay bytes arrive
+      localStorage.setItem(SESSION_TOKEN_KEY, msg.token)
+      term.clear()
+      showSessionBanner('Resumed session')
       break
 
     case 'pong':
@@ -255,15 +288,34 @@ function handleControlMessage(msg: ServerMessage): void {
       break
 
     case 'error':
+      // Discard a stale token if the server reports an error (session may be gone)
+      localStorage.removeItem(SESSION_TOKEN_KEY)
       term.writeln(`\r\n\x1b[31m[error] ${msg.message}\x1b[0m`)
       break
 
     case 'exit':
+      // PTY exited — clear the token so the next connection starts fresh
+      localStorage.removeItem(SESSION_TOKEN_KEY)
       term.writeln(
         `\r\n\x1b[33m[session ended — exit code ${msg.exitCode ?? 0}]\x1b[0m`,
       )
       break
   }
+}
+
+// ── Session banner ────────────────────────────────────────────────────────────
+
+let bannerTimer: ReturnType<typeof setTimeout> | null = null
+
+function showSessionBanner(text: string): void {
+  if (!sessionBanner) return
+  sessionBanner.textContent = text
+  sessionBanner.classList.add('visible')
+  if (bannerTimer) clearTimeout(bannerTimer)
+  bannerTimer = setTimeout(() => {
+    sessionBanner.classList.remove('visible')
+    bannerTimer = null
+  }, 3_000)
 }
 
 function onDisconnect(): void {
@@ -287,7 +339,8 @@ function manualReconnect(): void {
   reconnectDelay = RECONNECT_BASE_MS
   ws?.close()
   ws = null
-  term.clear()
+  // Terminal is cleared by handleControlMessage when the server responds
+  // with { type: "session" } or { type: "resumed" }
   connect()
 }
 

@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { MessageSquare, FolderOpen, Settings, ChevronLeft, ChevronRight } from "lucide-react";
+import { MessageSquare, FolderOpen, Settings, ChevronLeft, ChevronRight, Clock, Search } from "lucide-react";
 import { useChatStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { ChatHistory } from "./ChatHistory";
 import { FileExplorer } from "./FileExplorer";
 import { QuickActions } from "./QuickActions";
+import { HistoryView } from "@/components/history/HistoryView";
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 480;
@@ -17,6 +18,7 @@ type SidebarTab = "chats" | "history" | "files" | "settings";
 
 const TABS: Array<{ id: SidebarTab; icon: React.ElementType; label: string }> = [
   { id: "chats", icon: MessageSquare, label: "Chats" },
+  { id: "history", icon: Clock, label: "History" },
   { id: "files", icon: FolderOpen, label: "Files" },
   { id: "settings", icon: Settings, label: "Settings" },
 ];
@@ -30,6 +32,7 @@ export function Sidebar() {
     setSidebarWidth,
     setSidebarTab,
     openSettings,
+    openSearch,
   } = useChatStore();
 
   const [isResizing, setIsResizing] = useState(false);
@@ -85,7 +88,7 @@ export function Sidebar() {
   return (
     <motion.aside
       className={cn(
-        "hidden md:flex flex-col h-full bg-surface-900 border-r border-surface-800",
+        "flex flex-col h-full bg-surface-900 border-r border-surface-800",
         "relative flex-shrink-0 z-20",
         isResizing && "select-none"
       )}
@@ -104,6 +107,16 @@ export function Sidebar() {
           <span className="flex-1 text-sm font-semibold text-surface-100 px-4 py-3 truncate">
             Claude Code
           </span>
+        )}
+        {sidebarOpen && (
+          <button
+            onClick={openSearch}
+            title="Search conversations (⌘⇧F)"
+            aria-label="Search conversations"
+            className="p-1.5 rounded-md text-surface-500 hover:text-surface-300 hover:bg-surface-800/60 transition-colors mr-1"
+          >
+            <Search className="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
         )}
 
         <div
@@ -162,7 +175,8 @@ export function Sidebar() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.1 }}
           >
-            {(sidebarTab === "chats" || sidebarTab === "history") && <ChatHistory />}
+            {sidebarTab === "chats" && <ChatHistory />}
+            {sidebarTab === "history" && <HistoryView />}
             {sidebarTab === "files" && <FileExplorer />}
           </motion.div>
         )}

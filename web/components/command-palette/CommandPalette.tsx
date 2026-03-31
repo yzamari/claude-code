@@ -163,9 +163,18 @@ export function CommandPalette() {
         >
           {/* Search input */}
           <div className="flex items-center gap-2 px-3 py-3 border-b border-surface-800">
-            <Search className="w-4 h-4 text-surface-500 flex-shrink-0" />
+            <Search className="w-4 h-4 text-surface-500 flex-shrink-0" aria-hidden="true" />
             <input
               ref={inputRef}
+              id="command-palette-input"
+              role="combobox"
+              aria-label="Search commands"
+              aria-expanded={filteredGroups.length > 0}
+              aria-controls="command-palette-listbox"
+              aria-activedescendant={
+                flatResults[activeIndex] ? `cmd-option-${flatResults[activeIndex].id}` : undefined
+              }
+              aria-autocomplete="list"
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
@@ -177,7 +186,10 @@ export function CommandPalette() {
                 "placeholder:text-surface-500 focus:outline-none"
               )}
             />
-            <kbd className="hidden sm:inline-flex items-center h-5 px-1.5 rounded text-[10px] font-mono bg-surface-800 border border-surface-700 text-surface-500">
+            <kbd
+              aria-label="Press Escape to close"
+              className="hidden sm:inline-flex items-center h-5 px-1.5 rounded text-[10px] font-mono bg-surface-800 border border-surface-700 text-surface-500"
+            >
               Esc
             </kbd>
           </div>
@@ -185,7 +197,9 @@ export function CommandPalette() {
           {/* Results */}
           <div
             ref={listRef}
+            id="command-palette-listbox"
             role="listbox"
+            aria-label="Commands"
             className="overflow-y-auto max-h-[360px] py-1"
           >
             {filteredGroups.length === 0 ? (
@@ -237,6 +251,7 @@ export function CommandPalette() {
             </span>
             <button
               onClick={() => { closePalette(); openHelp(); }}
+              aria-label="View all keyboard shortcuts"
               className="ml-auto hover:text-surface-300 transition-colors"
             >
               ? View all shortcuts

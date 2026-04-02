@@ -47,6 +47,8 @@ async function* openAIStreamToAnthropicStream(
   let buffer = ''
   let blockIndex = 0
   let isFirstTextChunk = true
+  let fullText = ''
+  let deferredMessageDelta: unknown = null
 
   while (true) {
     const { done, value } = await reader.read()
@@ -69,12 +71,23 @@ async function* openAIStreamToAnthropicStream(
         continue
       }
 
+      // Accumulate full text for tool call parsing
+      const textContent = chunk.choices[0]?.delta?.content
+      if (textContent) {
+        fullText += textContent
+      }
+
       const events = translateOpenAIChunkToAnthropicEvents(chunk, {
         blockIndex,
         isFirstChunk: isFirstTextChunk,
       })
 
       for (const event of events) {
+        // Defer message_delta so we can modify stop_reason if tool calls are found
+        if ((event as any).type === 'message_delta') {
+          deferredMessageDelta = event
+          continue
+        }
         yield event
         if (event.type === 'content_block_start') {
           isFirstTextChunk = false
@@ -84,6 +97,32 @@ async function* openAIStreamToAnthropicStream(
         }
       }
     }
+  }
+
+  // After stream completes, check for tool calls in text (for tool-less models)
+  const { parseToolCallsFromText } = await import('./toolPromptInjection.js')
+  const parsedCalls = parseToolCallsFromText(fullText)
+  if (parsedCalls.length > 0) {
+    // Emit synthetic tool_use content blocks
+    for (const call of parsedCalls) {
+      yield { type: 'content_block_start', index: blockIndex, content_block: { type: 'tool_use', id: call.id, name: call.name, input: {} } }
+      yield { type: 'content_block_delta', index: blockIndex, delta: { type: 'input_json_delta', partial_json: JSON.stringify(call.input) } }
+      yield { type: 'content_block_stop', index: blockIndex }
+      blockIndex++
+    }
+    // Override the stop reason to tool_use
+    if (deferredMessageDelta) {
+      const md = deferredMessageDelta as any
+      deferredMessageDelta = {
+        ...md,
+        delta: { ...md.delta, stop_reason: 'tool_use' },
+      }
+    }
+  }
+
+  // Emit the deferred message_delta (with possibly updated stop_reason)
+  if (deferredMessageDelta) {
+    yield deferredMessageDelta
   }
 
   // Emit synthetic message_stop
@@ -156,6 +195,17 @@ export function createOpenAICompatibleClient(config: OpenAIClientConfig) {
             const openAITools = tools && capabilities.supportsTools
               ? translateTools(tools)
               : undefined
+
+            // Tool-less model support: inject tool descriptions into system prompt
+            if (!capabilities.supportsTools && tools && tools.length > 0) {
+              const { injectToolsIntoSystemPrompt } = await import('./toolPromptInjection.js')
+              const translatedTools = translateTools(tools)
+              if (openAIMessages[0]?.role === 'system') {
+                openAIMessages[0] = injectToolsIntoSystemPrompt(openAIMessages[0] as any, translatedTools) as any
+              } else {
+                openAIMessages.unshift(injectToolsIntoSystemPrompt({ role: 'system', content: '' } as any, translatedTools) as any)
+              }
+            }
 
             const body: Record<string, unknown> = {
               model: config.model,

@@ -216,9 +216,39 @@ Claude Code uses a **single-threaded event loop** (Bun/Node.js model) with:
 
 ---
 
+## Multi-Model Router
+
+Claude Code supports routing queries to multiple model providers based on task type.
+
+### Architecture
+
+The ModelRouter sits between the query engine and the API client:
+
+```
+QueryEngine → ModelRouter → Provider Factory → API Client
+                                ├── Anthropic SDK (native)
+                                ├── OpenAI-Compatible Adapter (Ollama, OpenAI, OpenRouter)
+                                └── Gemini Adapter (Google AI)
+```
+
+### Key Files
+
+- `src/services/router/ModelRouter.ts` — Task classification and route matching
+- `src/services/router/taskClassifier.ts` — Heuristic task type detection
+- `src/services/router/capabilities.ts` — Model feature matrix
+- `src/services/router/routerConfig.ts` — Configuration schema
+- `src/services/api/adapters/` — Format translators (OpenAI, Gemini)
+
+### Configuration
+
+Add `modelRouter` to `~/.claude/settings.json`. See `docs/multi-model-setup.md` for details.
+
+---
+
 ## See Also
 
 - [Tools Reference](tools.md) — Complete catalog of all 40 agent tools
 - [Commands Reference](commands.md) — Complete catalog of all slash commands
 - [Subsystems Guide](subsystems.md) — Bridge, MCP, permissions, skills, plugins, and more
 - [Exploration Guide](exploration-guide.md) — How to navigate this codebase
+- [Multi-Model Setup Guide](multi-model-setup.md) — Configure multi-model routing with Ollama, OpenAI, Gemini, and more

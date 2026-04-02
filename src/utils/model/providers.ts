@@ -13,6 +13,22 @@ export function getAPIProvider(): APIProvider {
         : 'firstParty'
 }
 
+export type ExternalAPIProvider = 'openai-compatible' | 'openai' | 'gemini'
+
+export function parseExternalModelSpec(modelSpec: string): {
+  provider: string | null
+  model: string
+} {
+  const slashIndex = modelSpec.indexOf('/')
+  if (slashIndex === -1) {
+    return { provider: null, model: modelSpec }
+  }
+  return {
+    provider: modelSpec.slice(0, slashIndex),
+    model: modelSpec.slice(slashIndex + 1),
+  }
+}
+
 export function getAPIProviderForStatsig(): AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {
   return getAPIProvider() as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
 }

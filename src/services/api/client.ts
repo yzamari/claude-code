@@ -150,6 +150,31 @@ export async function getAnthropicClient({
       fetch: resolvedFetch,
     }),
   }
+
+  // Multi-model router: if model is in "provider/model" format, use adapter
+  if (model && model.includes('/')) {
+    const { createOpenAICompatibleClient } = await import('./adapters/OpenAIStreamClient.js')
+    const { parseExternalModelSpec } = await import('../../utils/model/providers.js')
+    const parsed = parseExternalModelSpec(model)
+
+    if (parsed.provider) {
+      const { getSettings_DEPRECATED } = await import('../../utils/settings/settings.js')
+      const settings = getSettings_DEPRECATED() || {}
+      const routerConfig = (settings as any).modelRouter
+      const providerConfig = routerConfig?.providers?.[parsed.provider]
+
+      if (providerConfig) {
+        const client = createOpenAICompatibleClient({
+          baseUrl: providerConfig.baseUrl ?? 'https://api.openai.com/v1',
+          apiKey: providerConfig.apiKey ?? process.env[`${parsed.provider.toUpperCase()}_API_KEY`],
+          model: parsed.model,
+          defaultHeaders: { ...defaultHeaders },
+        })
+        return client as unknown as Anthropic
+      }
+    }
+  }
+
   if (isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)) {
     const { AnthropicBedrock } = await import('@anthropic-ai/bedrock-sdk')
     // Use region override for small fast model if specified

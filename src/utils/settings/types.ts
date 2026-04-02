@@ -8,6 +8,7 @@ import {
   PERMISSION_MODES,
 } from '../permissions/PermissionMode.js'
 import { MarketplaceSourceSchema } from '../plugins/schemas.js'
+import { RouterConfigSchema } from '../../services/router/routerConfig.js'
 import { CLAUDE_CODE_SETTINGS_SCHEMA_URL } from './constants.js'
 import { PermissionRuleSchema } from './permissionValidation.js'
 
@@ -376,6 +377,11 @@ export const SettingsSchema = lazySchema(() =>
         .string()
         .optional()
         .describe('Override the default model used by Claude Code'),
+      modelRouter: RouterConfigSchema()
+        .optional()
+        .describe(
+          'Multi-model router configuration for task-based routing to different providers',
+        ),
       // Enterprise allowlist of models
       availableModels: z
         .array(z.string())

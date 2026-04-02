@@ -85,9 +85,9 @@ const KNOWN_CAPABILITIES: Record<string, Partial<ModelCapabilities>> = {
   },
   'deepseek-coder-v2': {
     maxInputTokens: 128_000, maxOutputTokens: 4096,
-    supportsTools: true, supportsVision: false, supportsThinking: false,
+    supportsTools: false, supportsVision: false, supportsThinking: false,
     supportsEffort: false, supportsCaching: false, supportsPDFs: false,
-    toolCallStyle: 'openai',
+    toolCallStyle: 'none',
   },
 }
 

@@ -100,67 +100,90 @@ export function createOpenAICompatibleClient(config: OpenAIClientConfig) {
   return {
     beta: {
       messages: {
-        create: async (params: Record<string, unknown>, options?: { signal?: AbortSignal; headers?: Record<string, string> }) => {
-          // Translate Anthropic params to OpenAI format
-          const messages = params.messages as Array<{ role: string; content: unknown }>
-          const system = params.system as Array<{ type: 'text'; text: string }> | undefined
-          const tools = params.tools as Array<{ name: string; description: string; input_schema: Record<string, unknown> }> | undefined
+        /**
+         * Mimics the Anthropic SDK's create() which returns a "thenable" object:
+         *   - Has .withResponse() method (called BEFORE await in the real codebase)
+         *   - Has .then()/.catch() so it can be awaited directly too
+         *
+         * Real codebase pattern:
+         *   const result = await anthropic.beta.messages.create({...}).withResponse()
+         *   // .withResponse() is called on the return value BEFORE the await resolves
+         */
+        create(params: Record<string, unknown>, options?: { signal?: AbortSignal; headers?: Record<string, string> }) {
+          // Build the actual API call as a lazy promise
+          const doFetch = async () => {
+            const messages = params.messages as Array<{ role: string; content: unknown }>
+            const system = params.system as Array<{ type: 'text'; text: string }> | undefined
+            const tools = params.tools as Array<{ name: string; description: string; input_schema: Record<string, unknown> }> | undefined
 
-          const openAIMessages = [
-            ...(system ? [translateSystemPrompt(system)] : []),
-            ...translateAnthropicToOpenAI(messages as any),
-          ]
+            const openAIMessages = [
+              ...(system ? [translateSystemPrompt(system)] : []),
+              ...translateAnthropicToOpenAI(messages as any),
+            ]
 
-          const openAITools = tools && capabilities.supportsTools
-            ? translateTools(tools)
-            : undefined
+            const openAITools = tools && capabilities.supportsTools
+              ? translateTools(tools)
+              : undefined
 
-          const body: Record<string, unknown> = {
-            model: config.model,
-            messages: openAIMessages,
-            stream: true,
-            max_tokens: params.max_tokens,
+            const body: Record<string, unknown> = {
+              model: config.model,
+              messages: openAIMessages,
+              stream: true,
+              max_tokens: params.max_tokens,
+            }
+
+            if (openAITools && openAITools.length > 0) {
+              body.tools = openAITools
+            }
+
+            const response = await fetch(`${config.baseUrl}/chat/completions`, {
+              method: 'POST',
+              headers: {
+                ...headers,
+                ...(options?.headers ?? {}),
+              },
+              body: JSON.stringify(body),
+              signal: options?.signal,
+            })
+
+            if (!response.ok) {
+              const text = await response.text()
+              throw new Error(`OpenAI-compatible API error (${response.status}): ${text}`)
+            }
+
+            const stream = openAIStreamToAnthropicStream(response, config.model)
+            const streamObj = Object.assign(stream, {
+              controller: new AbortController(),
+            })
+
+            return { stream: streamObj, response }
           }
 
-          if (openAITools && openAITools.length > 0) {
-            body.tools = openAITools
+          // Cache the promise so both .then() and .withResponse() share the same fetch
+          let fetchPromise: ReturnType<typeof doFetch> | null = null
+          const ensureFetch = () => {
+            if (!fetchPromise) fetchPromise = doFetch()
+            return fetchPromise
           }
 
-          // Strip Anthropic-specific params (thinking, betas, cache_control, etc.)
-          // They are simply not sent — graceful degradation
-
-          const response = await fetch(`${config.baseUrl}/chat/completions`, {
-            method: 'POST',
-            headers: {
-              ...headers,
-              ...(options?.headers ?? {}),
-            },
-            body: JSON.stringify(body),
-            signal: options?.signal,
-          })
-
-          if (!response.ok) {
-            const text = await response.text()
-            throw new Error(`OpenAI-compatible API error (${response.status}): ${text}`)
-          }
-
-          // Return an object that matches the Anthropic stream shape
-          const stream = openAIStreamToAnthropicStream(response, config.model)
-
-          // The Anthropic SDK returns a Stream with .withResponse()
-          // We mimic that interface
-          const streamObj = Object.assign(stream, {
-            controller: new AbortController(),
-            async withResponse() {
-              return {
+          // Return a thenable with .withResponse() — matches Anthropic SDK shape
+          return {
+            // .withResponse() — called before await in the real codebase
+            withResponse() {
+              return ensureFetch().then(({ stream, response }) => ({
                 data: stream,
                 response,
                 request_id: response.headers.get('x-request-id') ?? randomUUID(),
-              }
+              }))
             },
-          })
-
-          return streamObj
+            // Make it thenable so `await create(...)` also works
+            then(resolve: (value: any) => any, reject?: (reason: any) => any) {
+              return ensureFetch().then(({ stream }) => stream).then(resolve, reject)
+            },
+            catch(reject: (reason: any) => any) {
+              return ensureFetch().then(({ stream }) => stream).catch(reject)
+            },
+          }
         },
       },
     },

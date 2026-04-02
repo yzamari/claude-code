@@ -374,9 +374,25 @@ export async function* withRetry<T>(
       // AWS/GCP errors aren't always APIError, but can be retried
       const handledCloudAuthError =
         handleAwsCredentialError(error) || handleGcpCredentialError(error)
+
+      // Duck-type check: OpenAI-compatible errors have .status and .headers.get()
+      // but are not instanceof APIError. Allow them into the retry path.
+      const isRetryableErrorShape = (e: unknown): boolean =>
+        e instanceof Error &&
+        typeof (e as any).status === 'number' &&
+        typeof (e as any).headers?.get === 'function'
+
       if (
         !handledCloudAuthError &&
-        (!(error instanceof APIError) || !shouldRetry(error))
+        !(error instanceof APIError) &&
+        !isRetryableErrorShape(error)
+      ) {
+        throw new CannotRetryError(error, retryContext)
+      }
+      if (
+        !handledCloudAuthError &&
+        (error instanceof APIError || isRetryableErrorShape(error)) &&
+        !shouldRetry(error as any)
       ) {
         throw new CannotRetryError(error, retryContext)
       }

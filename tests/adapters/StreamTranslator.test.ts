@@ -119,4 +119,42 @@ describe('StreamTranslator', () => {
     const event = createMessageStopEvent()
     expect(event.type).toBe('message_stop')
   })
+
+  it('includes input_tokens in message_delta usage from final chunk', () => {
+    const chunk: OpenAIChunk = {
+      id: 'chatcmpl-123',
+      object: 'chat.completion.chunk',
+      created: 1234567890,
+      model: 'gpt-4o',
+      choices: [{
+        index: 0,
+        delta: {},
+        finish_reason: 'stop',
+      }],
+      usage: {
+        prompt_tokens: 150,
+        completion_tokens: 42,
+        total_tokens: 192,
+      },
+    }
+    const events = translateOpenAIChunkToAnthropicEvents(chunk, { blockIndex: 0, isFirstChunk: false })
+    const messageDelta = events.find(e => e.type === 'message_delta')
+    expect(messageDelta?.usage?.input_tokens).toBe(150)
+    expect(messageDelta?.usage?.output_tokens).toBe(42)
+  })
+
+  it('handles missing usage field gracefully (defaults to 0)', () => {
+    const chunk: OpenAIChunk = {
+      id: 'chatcmpl-123',
+      object: 'chat.completion.chunk',
+      created: 1234567890,
+      model: 'gpt-4o',
+      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      // No usage field
+    }
+    const events = translateOpenAIChunkToAnthropicEvents(chunk, { blockIndex: 0, isFirstChunk: false })
+    const messageDelta = events.find(e => e.type === 'message_delta')
+    expect(messageDelta?.usage?.input_tokens).toBe(0)
+    expect(messageDelta?.usage?.output_tokens).toBe(0)
+  })
 })

@@ -86,6 +86,15 @@ export const COST_HAIKU_45 = {
   webSearchRequests: 0.01,
 } as const satisfies ModelCosts
 
+/** Zero cost for local models (Ollama, mlx-tq, LM Studio, etc.) */
+export const COST_ZERO: ModelCosts = {
+  inputTokens: 0,
+  outputTokens: 0,
+  promptCacheWriteTokens: 0,
+  promptCacheReadTokens: 0,
+  webSearchRequests: 0,
+}
+
 const DEFAULT_UNKNOWN_MODEL_COST = COST_TIER_5_25
 
 /**
@@ -154,6 +163,16 @@ export function getModelCosts(model: string, usage: Usage): ModelCosts {
 
   const costs = MODEL_COSTS[shortName]
   if (!costs) {
+    // External provider models (provider/model format) — tracked separately
+    if (model.includes('/')) {
+      return COST_ZERO
+    }
+    // Known local model patterns — free
+    const localPatterns = ['llama', 'qwen', 'deepseek', 'mistral', 'phi-', 'gemma']
+    if (localPatterns.some(p => model.toLowerCase().includes(p))) {
+      return COST_ZERO
+    }
+
     trackUnknownModelCost(model, shortName)
     return (
       MODEL_COSTS[getCanonicalName(getDefaultMainLoopModelSetting())] ??

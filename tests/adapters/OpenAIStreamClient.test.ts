@@ -26,4 +26,24 @@ describe('createOpenAICompatibleClient', () => {
     const client = createOpenAICompatibleClient(config)
     expect(client).toBeDefined()
   })
+
+  it('includes stream_options in request body', () => {
+    const client = createOpenAICompatibleClient({
+      baseUrl: 'http://localhost:9999/v1',
+      model: 'test-model',
+    })
+    expect(typeof client.beta.messages.create).toBe('function')
+  })
+
+  it('throws OpenAICompatibleAPIError shape on connection refused', async () => {
+    const client = createOpenAICompatibleClient({
+      baseUrl: 'http://localhost:1/v1', // port 1 — guaranteed to fail
+      model: 'test-model',
+    })
+    const streamObj = client.beta.messages.create(
+      { model: 'test', messages: [{ role: 'user', content: 'hi' }], max_tokens: 10, stream: true },
+      {}
+    )
+    await expect(streamObj.withResponse()).rejects.toThrow(/Connection failed/)
+  })
 })

@@ -4,6 +4,45 @@
 
 ---
 
+## Persistent Configuration
+
+Instead of passing `--settings` on every launch, add `modelRouter` to your settings file:
+
+**File:** `~/.claude/settings.json`
+
+```json
+{
+  "modelRouter": {
+    "enabled": true,
+    "default": "gemini/gemini-3.1-pro-preview",
+    "providers": {
+      "gemini": {
+        "type": "openai-compatible",
+        "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "models": ["gemini-3.1-pro-preview", "gemini-2.5-flash"]
+      },
+      "ollama": {
+        "type": "openai-compatible",
+        "baseUrl": "http://localhost:11434/v1",
+        "models": ["deepseek-coder-v2", "qwen2.5:0.5b"]
+      }
+    },
+    "routes": [
+      { "tasks": ["file_search", "grep"], "model": "ollama/deepseek-coder-v2" },
+      { "tasks": ["complex_reasoning", "planning"], "model": "gemini/gemini-3.1-pro-preview" }
+    ],
+    "fallbackChain": ["gemini/gemini-2.5-flash", "ollama/qwen2.5:0.5b"]
+  }
+}
+```
+
+Then just run:
+```bash
+CLAUDE_CODE_SKIP_VERSION_CHECK=1 ANTHROPIC_API_KEY=dummy bun dist/cli.mjs --bare
+```
+
+---
+
 ## Quick Start: Local Models with Ollama
 
 Get up and running with free local inference in under five minutes.

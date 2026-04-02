@@ -483,6 +483,34 @@ export function getModelOptions(fastMode = false): ModelOption[] {
     }
   }
 
+  // Append external provider models from modelRouter settings
+  try {
+    const routerSettings = getSettings_DEPRECATED() || {}
+    const routerConfig = (routerSettings as any).modelRouter
+    if (routerConfig?.enabled && routerConfig?.providers) {
+      for (const [providerName, provider] of Object.entries(
+        routerConfig.providers,
+      )) {
+        const prov = provider as { models?: string[] }
+        if (prov.models) {
+          for (const model of prov.models) {
+            const fullSpec = `${providerName}/${model}`
+            // Add if not already in list
+            if (!options.some((o: any) => o.value === fullSpec)) {
+              options.push({
+                value: fullSpec,
+                label: `${model} (${providerName})`,
+                description: `External: ${providerName}`,
+              })
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // Settings not available, skip
+  }
+
   // Add custom model from either the current model value or the initial one
   // if it is not already in the options.
   let customModel: ModelSetting = null

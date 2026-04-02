@@ -128,30 +128,8 @@ export async function getAnthropicClient({
     defaultHeaders['x-anthropic-additional-protection'] = 'true'
   }
 
-  logForDebugging('[API:auth] OAuth token check starting')
-  await checkAndRefreshOAuthTokenIfNeeded()
-  logForDebugging('[API:auth] OAuth token check complete')
-
-  if (!isClaudeAISubscriber()) {
-    await configureApiKeyHeaders(defaultHeaders, getIsNonInteractiveSession())
-  }
-
-  const resolvedFetch = buildFetch(fetchOverride, source)
-
-  const ARGS = {
-    defaultHeaders,
-    maxRetries,
-    timeout: parseInt(process.env.API_TIMEOUT_MS || String(600 * 1000), 10),
-    dangerouslyAllowBrowser: true,
-    fetchOptions: getProxyFetchOptions({
-      forAnthropicAPI: true,
-    }) as ClientOptions['fetchOptions'],
-    ...(resolvedFetch && {
-      fetch: resolvedFetch,
-    }),
-  }
-
-  // Multi-model router: if model is in "provider/model" format, use adapter
+  // Multi-model router: short-circuit BEFORE auth checks for external providers.
+  // This avoids OAuth/keychain lookups when routing to non-Anthropic models.
   if (model && model.includes('/')) {
     const { createOpenAICompatibleClient } = await import('./adapters/OpenAIStreamClient.js')
     const { parseExternalModelSpec } = await import('../../utils/model/providers.js')
@@ -175,6 +153,28 @@ export async function getAnthropicClient({
     }
   }
 
+  logForDebugging('[API:auth] OAuth token check starting')
+  await checkAndRefreshOAuthTokenIfNeeded()
+  logForDebugging('[API:auth] OAuth token check complete')
+
+  if (!isClaudeAISubscriber()) {
+    await configureApiKeyHeaders(defaultHeaders, getIsNonInteractiveSession())
+  }
+
+  const resolvedFetch = buildFetch(fetchOverride, source)
+
+  const ARGS = {
+    defaultHeaders,
+    maxRetries,
+    timeout: parseInt(process.env.API_TIMEOUT_MS || String(600 * 1000), 10),
+    dangerouslyAllowBrowser: true,
+    fetchOptions: getProxyFetchOptions({
+      forAnthropicAPI: true,
+    }) as ClientOptions['fetchOptions'],
+    ...(resolvedFetch && {
+      fetch: resolvedFetch,
+    }),
+  }
   if (isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)) {
     const { AnthropicBedrock } = await import('@anthropic-ai/bedrock-sdk')
     // Use region override for small fast model if specified

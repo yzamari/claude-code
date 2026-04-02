@@ -119,6 +119,7 @@ export function translateOpenAIChunkToAnthropicEvents(
         stop_reason: FINISH_REASON_MAP[finish_reason] || 'end_turn',
       },
       usage: {
+        input_tokens: chunk.usage?.prompt_tokens ?? 0,
         output_tokens: chunk.usage?.completion_tokens ?? 0,
       },
     })

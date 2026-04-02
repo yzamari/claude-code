@@ -18,6 +18,7 @@ import {
   type OpenAIChunk,
 } from './StreamTranslator.js'
 import { getModelCapabilities } from '../../router/capabilities.js'
+import { OpenAICompatibleAPIError } from './errors.js'
 
 export interface OpenAIClientConfig {
   baseUrl: string
@@ -121,6 +122,37 @@ export function createOpenAICompatibleClient(config: OpenAIClientConfig) {
               ...translateAnthropicToOpenAI(messages as any),
             ]
 
+            // --- Capability enforcement: strip unsupported content ---
+
+            // Vision stripping: remove image blocks if model doesn't support vision
+            if (!capabilities.supportsVision) {
+              for (const msg of openAIMessages) {
+                if (Array.isArray((msg as any).content)) {
+                  ;(msg as any).content = (msg as any).content.filter(
+                    (part: any) => part.type !== 'image_url' && part.type !== 'image',
+                  )
+                }
+              }
+            }
+
+            // PDF stripping: remove document/file blocks if model doesn't support PDFs
+            if (!capabilities.supportsPDFs) {
+              for (const msg of openAIMessages) {
+                if (Array.isArray((msg as any).content)) {
+                  ;(msg as any).content = (msg as any).content.filter(
+                    (part: any) => part.type !== 'document' && part.type !== 'file',
+                  )
+                }
+              }
+            }
+
+            // max_tokens capping: clamp to model's actual maximum output tokens
+            const maxTokens = typeof params.max_tokens === 'number'
+              ? Math.min(params.max_tokens as number, capabilities.maxOutputTokens)
+              : capabilities.maxOutputTokens
+
+            // --- End capability enforcement ---
+
             const openAITools = tools && capabilities.supportsTools
               ? translateTools(tools)
               : undefined
@@ -129,26 +161,40 @@ export function createOpenAICompatibleClient(config: OpenAIClientConfig) {
               model: config.model,
               messages: openAIMessages,
               stream: true,
-              max_tokens: params.max_tokens,
+              stream_options: { include_usage: true },
+              max_tokens: maxTokens,
             }
 
             if (openAITools && openAITools.length > 0) {
               body.tools = openAITools
             }
 
-            const response = await fetch(`${config.baseUrl}/chat/completions`, {
-              method: 'POST',
-              headers: {
-                ...headers,
-                ...(options?.headers ?? {}),
-              },
-              body: JSON.stringify(body),
-              signal: options?.signal,
-            })
+            let response: Response
+            try {
+              response = await fetch(`${config.baseUrl}/chat/completions`, {
+                method: 'POST',
+                headers: {
+                  ...headers,
+                  ...(options?.headers ?? {}),
+                },
+                body: JSON.stringify(body),
+                signal: options?.signal,
+              })
+            } catch (fetchError) {
+              throw new OpenAICompatibleAPIError(
+                0,
+                `Connection failed: ${(fetchError as Error).message}`,
+                new Headers(),
+              )
+            }
 
             if (!response.ok) {
               const text = await response.text()
-              throw new Error(`OpenAI-compatible API error (${response.status}): ${text}`)
+              throw new OpenAICompatibleAPIError(
+                response.status,
+                `OpenAI-compatible API error (${response.status}): ${text}`,
+                response.headers,
+              )
             }
 
             const stream = openAIStreamToAnthropicStream(response, config.model)

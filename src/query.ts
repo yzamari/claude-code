@@ -94,6 +94,7 @@ import { executeStopFailureHooks } from './utils/hooks.js'
 import type { QuerySource } from './constants/querySource.js'
 import { createDumpPromptsFetch } from './services/api/dumpPrompts.js'
 import { StreamingToolExecutor } from './services/tools/StreamingToolExecutor.js'
+import { resolveModelForQuery } from './services/router/resolveRouteForQuery.js'
 import { queryCheckpoint } from './utils/queryProfiler.js'
 import { runTools } from './services/tools/toolOrchestration.js'
 import { applyToolResultBudget } from './utils/toolResultStorage.js'
@@ -569,7 +570,27 @@ async function* queryLoop(
 
     const appState = toolUseContext.getAppState()
     const permissionMode = appState.toolPermissionContext.mode
-    let currentModel = getRuntimeMainLoopModel({
+
+    // Task-based model routing: resolve external provider if configured
+    const routerSettings = (() => {
+      try {
+        const { getSettings_DEPRECATED } = require('./utils/settings/settings.js')
+        return (getSettings_DEPRECATED() as any)?.modelRouter
+      } catch { return undefined }
+    })()
+    const lastAssistantMsg = messagesForQuery.filter((m: any) => m.type === 'assistant').at(-1)
+    const lastToolNames: string[] = (lastAssistantMsg as any)?.message?.content
+      ?.filter((b: any) => b.type === 'tool_use')
+      ?.map((b: any) => b.name) ?? []
+    const routedModel = resolveModelForQuery(routerSettings, {
+      lastToolNames,
+      messageTokenCount: messagesForQuery.length * 500,
+      isPlanMode: permissionMode === 'plan',
+      isSubagent: !!toolUseContext.agentId,
+      userModelOverride: undefined,
+    })
+
+    let currentModel = routedModel ?? getRuntimeMainLoopModel({
       permissionMode,
       mainLoopModel: toolUseContext.options.mainLoopModel,
       exceeds200kTokens:

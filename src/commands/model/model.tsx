@@ -174,6 +174,13 @@ function SetModelAndClose({
         return;
       }
 
+      // Skip validation for external provider models (provider/model format)
+      if (model.includes('/')) {
+        // External models don't need Anthropic API validation
+        setModel(model);
+        return;
+      }
+
       // Validate and set custom model
       try {
         // Don't use parseUserSpecifiedModel for non-aliases since it lowercases the input

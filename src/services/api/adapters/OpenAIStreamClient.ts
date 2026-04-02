@@ -121,8 +121,15 @@ async function* openAIStreamToAnthropicStream(
   }
 
   // Emit the deferred message_delta (with possibly updated stop_reason)
+  // If no message_delta was deferred (server didn't send finish_reason), synthesize one
   if (deferredMessageDelta) {
     yield deferredMessageDelta
+  } else {
+    yield {
+      type: 'message_delta',
+      delta: { stop_reason: 'end_turn' },
+      usage: { input_tokens: 0, output_tokens: 0 },
+    }
   }
 
   // Emit synthetic message_stop
@@ -211,7 +218,6 @@ export function createOpenAICompatibleClient(config: OpenAIClientConfig) {
               model: config.model,
               messages: openAIMessages,
               stream: true,
-              stream_options: { include_usage: true },
               max_tokens: maxTokens,
             }
 

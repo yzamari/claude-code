@@ -12,6 +12,7 @@ MODEL_ALIAS="${1:-smart}"
 case "$MODEL_ALIAS" in
   gemini|gemini-3.1)      MODEL="gemini/gemini-3.1-pro-preview" ;;
   gemini-flash)           MODEL="gemini/gemini-2.5-flash" ;;
+  flash-lite|lite)        MODEL="gemini/gemini-3.1-flash-lite-preview" ;;
   gemini-pro)             MODEL="gemini/gemini-2.5-pro" ;;
   ollama|deepseek)        MODEL="ollama/deepseek-coder-v2" ;;
   qwen)                   MODEL="ollama/qwen2.5:0.5b" ;;
@@ -38,7 +39,7 @@ esac
 #
 #   Fallback: Claude → Gemini → Ollama
 #
-SETTINGS='{"modelRouter":{"enabled":true,"default":"gemini/gemini-3.1-pro-preview","providers":{"gemini":{"type":"openai-compatible","baseUrl":"https://generativelanguage.googleapis.com/v1beta/openai","models":["gemini-3.1-pro-preview","gemini-2.5-flash","gemini-2.5-pro"]},"ollama":{"type":"openai-compatible","baseUrl":"http://localhost:11434/v1","models":["deepseek-coder-v2","qwen2.5:0.5b"]},"tq":{"type":"openai-compatible","baseUrl":"http://localhost:8322/v1","models":["mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit"]}},"routes":[{"tasks":["file_search","grep","glob"],"model":"ollama/deepseek-coder-v2"},{"tasks":["simple_edit","test_execution"],"model":"ollama/deepseek-coder-v2"},{"tasks":["large_context"],"model":"gemini/gemini-3.1-pro-preview"},{"tasks":["subagent"],"model":"gemini/gemini-2.5-flash"},{"tasks":["complex_reasoning","planning"],"model":"claude-opus-4-6"}],"fallbackChain":["claude-sonnet-4-6","gemini/gemini-3.1-pro-preview","ollama/deepseek-coder-v2"]}}'
+SETTINGS='{"modelRouter":{"enabled":true,"default":"gemini/gemini-3.1-pro-preview","providers":{"gemini":{"type":"openai-compatible","baseUrl":"https://generativelanguage.googleapis.com/v1beta/openai","models":["gemini-3.1-pro-preview","gemini-2.5-flash","gemini-2.5-pro","gemini-3.1-flash-lite-preview"]},"ollama":{"type":"openai-compatible","baseUrl":"http://localhost:11434/v1","models":["deepseek-coder-v2","qwen2.5:0.5b"]},"tq":{"type":"openai-compatible","baseUrl":"http://localhost:8322/v1","models":["mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit"]}},"routes":[{"tasks":["file_search","grep","glob"],"model":"gemini/gemini-3.1-flash-lite-preview"},{"tasks":["simple_edit","test_execution"],"model":"gemini/gemini-3.1-flash-lite-preview"},{"tasks":["large_context"],"model":"gemini/gemini-3.1-pro-preview"},{"tasks":["subagent"],"model":"gemini/gemini-2.5-flash"},{"tasks":["complex_reasoning","planning"],"model":"claude-opus-4-6"}],"fallbackChain":["claude-sonnet-4-6","gemini/gemini-3.1-pro-preview","gemini/gemini-3.1-flash-lite-preview"]}}'
 
 export CLAUDE_CODE_SKIP_VERSION_CHECK=1
 export ANTHROPIC_MODEL="$MODEL"
@@ -55,8 +56,8 @@ else
   echo "│    planning          → Claude Opus           │"
   echo "│    large context     → Gemini 2.5 Pro (2M)   │"
   echo "│    subagents         → Gemini 2.5 Flash       │"
-  echo "│    file search/grep  → Ollama (free, local)  │"
-  echo "│    simple edits      → Ollama (free, local)  │"
+  echo "│    file search/grep  → Gemini 3.1 Flash Lite  │"
+  echo "│    simple edits      → Gemini 3.1 Flash Lite  │"
   echo "│                                              │"
   echo "│  /model to switch manually                   │"
   echo "╰──────────────────────────────────────────────╯"

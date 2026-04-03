@@ -142,11 +142,13 @@ export async function getAnthropicClient({
       const providerConfig = routerConfig?.providers?.[parsed.provider]
 
       if (providerConfig) {
+        // Strip Anthropic-specific headers for external providers
+        const { Authorization, ...externalHeaders } = defaultHeaders as Record<string, string>
         const client = createOpenAICompatibleClient({
           baseUrl: providerConfig.baseUrl ?? 'https://api.openai.com/v1',
           apiKey: providerConfig.apiKey ?? process.env[`${parsed.provider.toUpperCase()}_API_KEY`],
           model: parsed.model,
-          defaultHeaders: { ...defaultHeaders },
+          defaultHeaders: externalHeaders,
         })
         return client as unknown as Anthropic
       }

@@ -745,7 +745,7 @@ function shouldRetry(error: APIError): boolean {
   }
 
   // Note this is not a standard header.
-  const shouldRetryHeader = error.headers?.get('x-should-retry')
+  const shouldRetryHeader = error.headers?.get?.('x-should-retry')
 
   // If the server explicitly says whether or not to retry, obey.
   // For Max and Pro users, should-retry is true, but in several hours, so we shouldn't.

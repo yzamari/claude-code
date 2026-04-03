@@ -582,13 +582,27 @@ async function* queryLoop(
     const lastToolNames: string[] = (lastAssistantMsg as any)?.message?.content
       ?.filter((b: any) => b.type === 'tool_use')
       ?.map((b: any) => b.name) ?? []
-    const routedModel = resolveModelForQuery(routerSettings, {
-      lastToolNames,
-      messageTokenCount: messagesForQuery.length * 500,
-      isPlanMode: permissionMode === 'plan',
-      isSubagent: !!toolUseContext.agentId,
-      userModelOverride: undefined,
+    // Check if user explicitly selected a model via /model command
+    // getRuntimeMainLoopModel reads the live AppState override set by /model
+    const runtimeModel = getRuntimeMainLoopModel({
+      permissionMode,
+      mainLoopModel: toolUseContext.options.mainLoopModel,
+      exceeds200kTokens:
+        permissionMode === 'plan' &&
+        doesMostRecentAssistantMessageExceed200k(messagesForQuery),
     })
+    // If the runtime model differs from the router default, user explicitly chose it
+    const isUserOverride = runtimeModel !== routerSettings?.default &&
+      runtimeModel !== toolUseContext.options.mainLoopModel
+    const routedModel = isUserOverride
+      ? null // User chose a specific model — skip routing entirely
+      : resolveModelForQuery(routerSettings, {
+          lastToolNames,
+          messageTokenCount: messagesForQuery.length * 500,
+          isPlanMode: permissionMode === 'plan',
+          isSubagent: !!toolUseContext.agentId,
+          userModelOverride: undefined,
+        })
 
     let currentModel = routedModel ?? getRuntimeMainLoopModel({
       permissionMode,

@@ -1,6 +1,6 @@
 /**
  * Uses an AI model to generate a custom ASCII character.
- * Returns sprite frames and personality tips.
+ * Uses a structured prompt that avoids JSON escaping issues with ASCII art.
  */
 
 export interface GeneratedCharacter {
@@ -10,36 +10,44 @@ export interface GeneratedCharacter {
   greeting: string // first message when character appears
 }
 
-const GENERATION_PROMPT = `Generate an ASCII art character for a terminal companion. The character is: {CHARACTER_NAME}
+// Use delimiters instead of JSON to avoid backslash/quote escaping nightmares
+const GENERATION_PROMPT = `Create a tiny ASCII art character for: {CHARACTER_NAME}
 
-You MUST respond in EXACTLY this JSON format, nothing else:
+Respond in EXACTLY this format (no JSON, no markdown):
 
-{
-  "name": "{CHARACTER_NAME}",
-  "frames": [
-    ["line1_____12", "line2_____12", "line3_____12", "line4_____12", "line5_____12"],
-    ["line1_____12", "line2_____12", "line3_____12", "line4_____12", "line5_____12"],
-    ["line1_____12", "line2_____12", "line3_____12", "line4_____12", "line5_____12"]
-  ],
-  "tips": [
-    "Tip or joke in character's voice 1",
-    "Tip or joke in character's voice 2",
-    "Tip or joke in character's voice 3",
-    "Tip or joke in character's voice 4"
-  ],
-  "greeting": "Hello message in character's voice"
-}
+NAME: {CHARACTER_NAME}
+GREETING: [one-line greeting in character voice]
+TIP1: [coding tip in character voice]
+TIP2: [coding tip in character voice]
+TIP3: [coding tip in character voice]
+TIP4: [coding tip in character voice]
+FRAME1:
+[line 1 - exactly 12 chars]
+[line 2 - exactly 12 chars]
+[line 3 - exactly 12 chars]
+[line 4 - exactly 12 chars]
+[line 5 - exactly 12 chars]
+FRAME2:
+[same as frame1 with tiny change]
+[line 2]
+[line 3]
+[line 4]
+[line 5]
+FRAME3:
+[same as frame1 with different tiny change]
+[line 2]
+[line 3]
+[line 4]
+[line 5]
 
 Rules:
-- Each frame is 5 lines, each line EXACTLY 12 characters (pad with spaces)
-- 3 frames for idle animation (small differences between frames)
-- The ASCII art should be recognizable as the character
-- Tips should be coding/programming related but in the character's voice/personality
-- Use simple ASCII characters only (letters, symbols, no unicode)
-- Frame 1 = idle, Frame 2 = small movement, Frame 3 = small variant
-- Make it cute and fun!
-
-RESPOND WITH ONLY THE JSON. No markdown, no explanation.`
+- Each line MUST be exactly 12 characters (pad shorter lines with spaces on the right)
+- Use only: letters, numbers, ( ) / | _ - . ~ ^ * = + < > : ; ' " # @ ! ?
+- Do NOT use backticks
+- The art should look like the character (head, body shape, distinctive features)
+- Frame 2 and 3 should differ by 1-2 characters from frame 1 (idle animation)
+- Tips should be about coding/programming in the character's personality
+- Keep it fun and recognizable!`
 
 /**
  * Normalize frames to exactly 3 frames of 5 lines, each line 12 chars.
@@ -48,6 +56,60 @@ export function normalizeFrames(frames: string[][]): string[][] {
   return frames.slice(0, 3).map((frame) =>
     frame.slice(0, 5).map((line) => line.slice(0, 12).padEnd(12)),
   )
+}
+
+/**
+ * Parse the structured text response into a GeneratedCharacter.
+ */
+function parseResponse(text: string, characterName: string): GeneratedCharacter {
+  const lines = text.split('\n')
+
+  let name = characterName
+  let greeting = `Hello! I'm ${characterName}!`
+  const tips: string[] = []
+  const frames: string[][] = [[], [], []]
+  let currentFrame = -1
+
+  for (const line of lines) {
+    const trimmed = line.trimEnd()
+
+    if (trimmed.startsWith('NAME:')) {
+      name = trimmed.slice(5).trim()
+    } else if (trimmed.startsWith('GREETING:')) {
+      greeting = trimmed.slice(9).trim()
+    } else if (trimmed.match(/^TIP\d:/)) {
+      tips.push(trimmed.replace(/^TIP\d:\s*/, ''))
+    } else if (trimmed === 'FRAME1:') {
+      currentFrame = 0
+    } else if (trimmed === 'FRAME2:') {
+      currentFrame = 1
+    } else if (trimmed === 'FRAME3:') {
+      currentFrame = 2
+    } else if (currentFrame >= 0 && currentFrame <= 2 && frames[currentFrame].length < 5 && trimmed.length > 0) {
+      // This is a sprite line — pad/truncate to 12 chars
+      frames[currentFrame].push(trimmed.slice(0, 12).padEnd(12))
+    }
+  }
+
+  // Fill missing frames/lines with defaults
+  const defaultLine = '            '
+  for (let f = 0; f < 3; f++) {
+    while (frames[f].length < 5) {
+      frames[f].push(defaultLine)
+    }
+  }
+  // If frame 2 or 3 are empty, copy frame 1
+  if (frames[1].every(l => l.trim() === '')) frames[1] = [...frames[0]]
+  if (frames[2].every(l => l.trim() === '')) frames[2] = [...frames[0]]
+
+  // Ensure at least 2 tips
+  if (tips.length === 0) {
+    tips.push(`${name} says: Keep coding!`, `${name} says: Don't forget to save!`)
+  } else if (tips.length === 1) {
+    tips.push(`${name} says: Keep going!`)
+  }
+
+  return { name, frames: normalizeFrames(frames), tips, greeting }
 }
 
 export async function generateCharacter(
@@ -70,7 +132,7 @@ export async function generateCharacter(
     body: JSON.stringify({
       model,
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 1000,
+      max_tokens: 8000,
       temperature: 0.7,
     }),
   })
@@ -84,24 +146,9 @@ export async function generateCharacter(
   }
   const content = data.choices?.[0]?.message?.content ?? ''
 
-  // Extract JSON from response (handle markdown code blocks)
-  let jsonStr = content.trim()
-  if (jsonStr.startsWith('```')) {
-    jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
+  if (!content.trim()) {
+    throw new Error('Empty response from AI model')
   }
 
-  const parsed = JSON.parse(jsonStr) as GeneratedCharacter
-
-  // Validate structure
-  if (!parsed.frames || parsed.frames.length < 3) {
-    throw new Error('Invalid character: need 3 frames')
-  }
-  if (!parsed.tips || parsed.tips.length < 2) {
-    throw new Error('Invalid character: need at least 2 tips')
-  }
-
-  // Normalize frames to exactly 5 lines of 12 chars
-  parsed.frames = normalizeFrames(parsed.frames)
-
-  return parsed
+  return parseResponse(content, characterName)
 }

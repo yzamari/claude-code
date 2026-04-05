@@ -136,6 +136,9 @@ export type CompanionSoul = {
 export type Companion = CompanionBones &
   CompanionSoul & {
     hatchedAt: number
+    // When set, the sprite renderer uses these raw frames instead of the
+    // species-based lookup. Set by /character for AI-generated custom sprites.
+    customFrames?: string[][]
   }
 
 // What actually persists in config. Bones are regenerated from hash(userId)

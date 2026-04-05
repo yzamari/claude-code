@@ -7,6 +7,7 @@ export interface TaskContext {
   isSubagent: boolean
   userModelOverride: string | undefined
   bashCommand?: string
+  userPrompt?: string
 }
 
 const SEARCH_TOOLS = new Set(['GrepTool', 'GlobTool', 'FileReadTool'])
@@ -60,5 +61,49 @@ export function classifyTask(context: TaskContext): TaskType {
     return 'large_context'
   }
 
+  // First-turn heuristic: when no prior tools exist, classify from user prompt text
+  if (context.activeTools.length === 0 && context.userPrompt) {
+    const p = context.userPrompt.toLowerCase()
+    if (PLANNING_PATTERNS.some(r => r.test(p))) return 'planning'
+    if (FILE_SEARCH_PATTERNS.some(r => r.test(p))) return 'file_search'
+    if (SIMPLE_EDIT_PATTERNS.some(r => r.test(p))) return 'simple_edit'
+    if (TEST_PROMPT_PATTERNS.some(r => r.test(p))) return 'test_execution'
+  }
+
   return 'complex_reasoning'
 }
+
+const PLANNING_PATTERNS = [
+  /\bplan\b/i, /\barchitect/i, /\bdesign\b/i, /\bstrateg/i,
+  /\bhow\s+(?:should|would|can)\s+(?:we|i)\b/i, /\bpropose\b/i,
+  /\bmigrat/i,
+]
+
+const FILE_SEARCH_PATTERNS = [
+  /\bfind\b.*\b(?:files?|director|typescript|\.ts|\.js|\.py|matching|named)\b/i,
+  /\bsearch\b/i, /\bgrep\b/i, /\bglob\b/i,
+  /\bwhat\s+files?\b/i, /\bwhere\s+is\b/i, /\bwhere\s+(?:are|does)\b/i,
+  /\blist\b.*\b(?:files?|director)/i, /\blist\s+all\b/i,
+  /\blocate\b/i, /\blook\s+for\b/i, /\bshow\s+me\b/i,
+  /\bscan\b/i, /\bfind\s+all\b/i,
+  /\bimplementation\b/i, /\bwhere.*\bdefined\b/i,
+  /\b(?:which|what)\s+(?:file|module|class)\b/i,
+]
+
+const SIMPLE_EDIT_PATTERNS = [
+  /\brename\b/i, /\breplace\b.*\bwith\b/i, /\breplace\s+all\b/i,
+  /\badd\b.*\bimport/i, /\bremove\b.*\bline/i,
+  /\bfix\b.*\btypo/i, /\bfix\b.*\bspelling/i,
+  /\bchange\b.*\bto\b/i, /\bupdate\b.*\bto\b/i,
+  /\binsert\b/i, /\bdelete\b.*\bline/i,
+  /\badd\b.*\bat\s+(?:the\s+)?top/i,
+  /\bconsole\.log/i,
+]
+
+const TEST_PROMPT_PATTERNS = [
+  /\brun\b.*\btests?\b/i, /\btest\b.*\bsuite\b/i,
+  /\bvitest\b/i, /\bjest\b/i, /\bpytest\b/i, /\bmocha\b/i,
+  /\bnpm\s+test\b/i, /\bbun\s+test\b/i, /\bcargo\s+test\b/i,
+  /\brun\b.*\b(?:vitest|jest|pytest|mocha)\b/i,
+  /\bexecute\b.*\btest/i,
+]

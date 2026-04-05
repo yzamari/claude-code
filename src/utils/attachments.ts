@@ -196,6 +196,7 @@ import {
 import { isHumanTurn } from './messagePredicates.js'
 import { isEnvTruthy, getClaudeConfigHomeDir } from './envUtils.js'
 import { feature } from 'bun:bundle'
+import { isBuddyOrCustom } from '../buddy/customCharacter.js'
 /* eslint-disable @typescript-eslint/no-require-imports */
 const BRIEF_TOOL_NAME: string | null =
   feature('KAIROS') || feature('KAIROS_BRIEF')
@@ -861,7 +862,7 @@ export async function getAttachments(
         ),
       ),
     ),
-    ...(feature('BUDDY')
+    ...(isBuddyOrCustom()
       ? [
           maybe('companion_intro', () =>
             Promise.resolve(getCompanionIntroAttachment(messages)),

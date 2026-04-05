@@ -1,5 +1,7 @@
 import { feature } from 'bun:bundle';
 import chalk from 'chalk';
+import { getCompanion } from '../../buddy/companion.js';
+import { isBuddyOrCustom } from '../../buddy/customCharacter.js';
 import * as path from 'path';
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -309,11 +311,13 @@ function PromptInput({
   const {
     companion: _companion,
     companionMuted
-  } = feature('BUDDY') ? getGlobalConfig() : {
+  } = isBuddyOrCustom() ? getGlobalConfig() : {
     companion: undefined,
     companionMuted: undefined
   };
-  const companionFooterVisible = !!_companion && !companionMuted;
+  // Use getCompanion() which merges custom characters — config.companion
+  // may be undefined even when a custom character exists from /character.
+  const companionFooterVisible = isBuddyOrCustom() && !companionMuted && !!getCompanion();
   // Brief mode: BriefSpinner/BriefIdleStatus own the 2-row footprint above
   // the input. Dropping marginTop here lets the spinner sit flush against
   // the input bar. viewingAgentTaskId mirrors the gate on both (Spinner.tsx,
@@ -1786,7 +1790,7 @@ function PromptInput({
       }
       switch (footerItemSelected) {
         case 'companion':
-          if (feature('BUDDY')) {
+          if (isBuddyOrCustom()) {
             selectFooterItem(null);
             void onSubmit('/buddy');
           }
@@ -1981,8 +1985,8 @@ function PromptInput({
     });
   }, [effortNotificationText, addNotification, removeNotification]);
   useBuddyNotification();
-  const companionSpeaking = feature('BUDDY') ?
-  // biome-ignore lint/correctness/useHookAtTopLevel: feature() is a compile-time constant
+  const companionSpeaking = isBuddyOrCustom() ?
+  // biome-ignore lint/correctness/useHookAtTopLevel: isBuddyOrCustom() is effectively a compile-time constant
   useAppState(s => s.companionReaction !== undefined) : false;
   const {
     columns,

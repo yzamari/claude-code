@@ -4,7 +4,7 @@ import type {
   LocalJSXCommandOnDone,
 } from '../../types/command.js'
 import { generateCharacter } from '../../buddy/generateCharacter.js'
-import { saveCustomCharacter } from '../../buddy/customCharacter.js'
+import { saveCustomCharacter, invalidateBuddyCache } from '../../buddy/customCharacter.js'
 
 /**
  * Resolves an API endpoint and model for character generation.
@@ -70,6 +70,7 @@ export async function call(
       model,
     )
     saveCustomCharacter(character)
+    invalidateBuddyCache()
 
     // Format the sprite for display
     const spritePreview = character.frames[0]!.join('\n')

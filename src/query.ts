@@ -594,15 +594,30 @@ async function* queryLoop(
     // If the runtime model differs from the router default, user explicitly chose it
     const isUserOverride = runtimeModel !== routerSettings?.default &&
       runtimeModel !== toolUseContext.options.mainLoopModel
-    const routedModel = isUserOverride
-      ? null // User chose a specific model — skip routing entirely
+    const routeResult = isUserOverride
+      ? { model: null, fallbackChain: [] } // User chose a specific model — skip routing entirely
       : resolveModelForQuery(routerSettings, {
           lastToolNames,
           messageTokenCount: messagesForQuery.length * 500,
           isPlanMode: permissionMode === 'plan',
           isSubagent: !!toolUseContext.agentId,
           userModelOverride: undefined,
+          userPrompt: (() => {
+            const lastUser = messagesForQuery.filter((m: any) => m.type === 'user').at(-1) as any
+            if (!lastUser?.message) return undefined
+            const content = lastUser.message.content
+            if (typeof content === 'string') return content
+            if (Array.isArray(content)) {
+              return content
+                .filter((b: any) => b.type === 'text')
+                .map((b: any) => b.text)
+                .join(' ')
+            }
+            return undefined
+          })(),
         })
+    const routedModel = routeResult.model
+    const routerFallbackChain = routeResult.fallbackChain
 
     let currentModel = routedModel ?? getRuntimeMainLoopModel({
       permissionMode,
@@ -709,7 +724,7 @@ async function* queryLoop(
               toolChoice: undefined,
               isNonInteractiveSession:
                 toolUseContext.options.isNonInteractiveSession,
-              fallbackModel,
+              fallbackModel: fallbackModel ?? routerFallbackChain[0],
               onStreamingFallback: () => {
                 streamingFallbackOccured = true
               },

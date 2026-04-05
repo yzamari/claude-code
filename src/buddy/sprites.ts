@@ -1,4 +1,4 @@
-import type { CompanionBones, Eye, Hat, Species } from './types.js'
+import type { Companion, CompanionBones, Eye, Hat, Species } from './types.js'
 import {
   ada,
   axolotl,
@@ -691,7 +691,13 @@ const HAT_LINES: Record<Hat, string> = {
   tinyduck: '    ,>      ',
 }
 
-export function renderSprite(bones: CompanionBones, frame = 0): string[] {
+export function renderSprite(bones: CompanionBones & Partial<Pick<Companion, 'customFrames'>>, frame = 0): string[] {
+  // Custom character: use raw AI-generated frames directly
+  if (bones.customFrames && bones.customFrames.length > 0) {
+    const customFrame = bones.customFrames[frame % bones.customFrames.length]!
+    return [...customFrame]
+  }
+
   const frames = BODIES[bones.species]
   const body = frames[frame % frames.length]!.map(line =>
     line.replaceAll('{E}', bones.eye),
@@ -708,11 +714,17 @@ export function renderSprite(bones: CompanionBones, frame = 0): string[] {
   return lines
 }
 
-export function spriteFrameCount(species: Species): number {
+export function spriteFrameCount(species: Species, customFrames?: string[][]): number {
+  if (customFrames && customFrames.length > 0) return customFrames.length
   return BODIES[species].length
 }
 
-export function renderFace(bones: CompanionBones): string {
+export function renderFace(bones: CompanionBones & Partial<Pick<Companion, 'customFrames'>>): string {
+  // Custom character: extract a face from the middle of the first frame
+  if (bones.customFrames && bones.customFrames.length > 0) {
+    const midLine = bones.customFrames[0]![Math.floor(bones.customFrames[0]!.length / 2)]!
+    return midLine.trim().slice(0, 6) || '(o_o)'
+  }
   const eye: Eye = bones.eye
   switch (bones.species) {
     case duck:

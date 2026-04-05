@@ -17,36 +17,51 @@ const testConfig: RouterConfig = {
 }
 
 describe('resolveModelForQuery', () => {
-  it('returns null when router disabled', () => {
-    expect(resolveModelForQuery({ enabled: false, default: 'claude-opus-4-6' }, {
+  it('returns null model when router disabled', () => {
+    const result = resolveModelForQuery({ enabled: false, default: 'claude-opus-4-6' }, {
       lastToolNames: ['GrepTool'], messageTokenCount: 5000, isPlanMode: false, isSubagent: false, userModelOverride: undefined,
-    })).toBeNull()
+    })
+    expect(result.model).toBeNull()
+    expect(result.fallbackChain).toEqual([])
   })
 
-  it('returns null when config is undefined', () => {
-    expect(resolveModelForQuery(undefined, {
+  it('returns null model when config is undefined', () => {
+    const result = resolveModelForQuery(undefined, {
       lastToolNames: [], messageTokenCount: 5000, isPlanMode: false, isSubagent: false, userModelOverride: undefined,
-    })).toBeNull()
+    })
+    expect(result.model).toBeNull()
   })
 
   it('routes grep to Ollama', () => {
     const result = resolveModelForQuery(testConfig, {
       lastToolNames: ['GrepTool'], messageTokenCount: 5000, isPlanMode: false, isSubagent: false, userModelOverride: undefined,
     })
-    expect(result).toBe('ollama/qwen2.5-coder:7b')
+    expect(result.model).toBe('ollama/qwen2.5-coder:7b')
   })
 
   it('routes large context to Gemini', () => {
     const result = resolveModelForQuery(testConfig, {
       lastToolNames: [], messageTokenCount: 200000, isPlanMode: false, isSubagent: false, userModelOverride: undefined,
     })
-    expect(result).toBe('gemini/gemini-2.5-pro')
+    expect(result.model).toBe('gemini/gemini-2.5-pro')
   })
 
-  it('returns null for native Claude routes', () => {
+  it('returns null model for native Claude routes', () => {
     const result = resolveModelForQuery(testConfig, {
       lastToolNames: [], messageTokenCount: 5000, isPlanMode: false, isSubagent: false, userModelOverride: undefined,
     })
-    expect(result).toBeNull()
+    expect(result.model).toBeNull()
+  })
+
+  it('includes fallbackChain from config', () => {
+    const configWithFallback: RouterConfig = {
+      ...testConfig,
+      fallbackChain: ['claude-sonnet-4-6', 'gemini/gemini-2.5-pro'],
+    }
+    const result = resolveModelForQuery(configWithFallback, {
+      lastToolNames: ['GrepTool'], messageTokenCount: 5000, isPlanMode: false, isSubagent: false, userModelOverride: undefined,
+    })
+    expect(result.model).toBe('ollama/qwen2.5-coder:7b')
+    expect(result.fallbackChain).toEqual(['claude-sonnet-4-6', 'gemini/gemini-2.5-pro'])
   })
 })

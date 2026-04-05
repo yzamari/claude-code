@@ -26,3 +26,18 @@ export function loadCustomCharacter(): GeneratedCharacter | null {
 export function hasCustomCharacter(): boolean {
   return loadCustomCharacter() !== null
 }
+
+// Returns true when the companion sprite should render — either because
+// the BUDDY feature flag is on OR a custom character exists from /character.
+let _buddyEnabled: boolean | null = null
+export function isBuddyOrCustom(): boolean {
+  if (_buddyEnabled !== null) return _buddyEnabled
+  const { feature } = require('bun:bundle') as { feature: (name: string) => boolean }
+  _buddyEnabled = feature('BUDDY') || hasCustomCharacter()
+  return _buddyEnabled
+}
+
+// Call after /character saves a new character to bust the cache
+export function invalidateBuddyCache(): void {
+  _buddyEnabled = null
+}

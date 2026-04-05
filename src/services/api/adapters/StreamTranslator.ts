@@ -16,7 +16,7 @@ export interface OpenAIChunk {
       role?: string
       content?: string | null
       tool_calls?: Array<{
-        index: number
+        index?: number
         id?: string
         type?: string
         function?: { name?: string; arguments?: string }
@@ -34,6 +34,7 @@ export interface OpenAIChunk {
 interface TranslationState {
   blockIndex: number
   isFirstChunk: boolean
+  hasToolCalls?: boolean
 }
 
 // Minimal Anthropic event types — only the fields the streaming pipeline reads.
@@ -60,8 +61,9 @@ export function translateOpenAIChunkToAnthropicEvents(
 
   const { delta, finish_reason } = choice
 
-  // Text content
-  if (delta.content != null && delta.content !== '') {
+  // Text content — some models (e.g. gemma4-heretic) put output in "reasoning" instead of "content"
+  const textContent = delta.content ?? (delta as any).reasoning ?? null
+  if (textContent != null && textContent !== '') {
     if (state.isFirstChunk) {
       events.push({
         type: 'content_block_start',
@@ -72,30 +74,41 @@ export function translateOpenAIChunkToAnthropicEvents(
     events.push({
       type: 'content_block_delta',
       index: state.blockIndex,
-      delta: { type: 'text_delta', text: delta.content },
+      delta: { type: 'text_delta', text: textContent },
     })
   }
 
   // Tool calls
   if (delta.tool_calls) {
     for (const tc of delta.tool_calls) {
+      // Gemini may omit the index field (OpenAI always includes it).
+      // Default to 0 when missing so blockIndex arithmetic stays valid.
+      const tcIndex = tc.index ?? 0
+
+      // Gemini 3.x includes thought_signature in tool calls. Capture it so
+      // we can include it in the assistant message when sending tool results back.
+      const thoughtSignature =
+        (tc as any).extra_content?.google?.thought_signature as string | undefined
+
       if (tc.id && tc.function?.name) {
         // New tool call — emit content_block_start
+        state.hasToolCalls = true
         events.push({
           type: 'content_block_start',
-          index: state.blockIndex + tc.index,
+          index: state.blockIndex + tcIndex,
           content_block: {
             type: 'tool_use',
             id: tc.id,
             name: tc.function.name,
             input: {},
+            ...(thoughtSignature ? { _gemini_thought_signature: thoughtSignature } : {}),
           },
         })
       }
       if (tc.function?.arguments) {
         events.push({
           type: 'content_block_delta',
-          index: state.blockIndex + tc.index,
+          index: state.blockIndex + tcIndex,
           delta: {
             type: 'input_json_delta',
             partial_json: tc.function.arguments,
@@ -113,10 +126,17 @@ export function translateOpenAIChunkToAnthropicEvents(
       index: state.blockIndex,
     })
 
+    // Gemini may send finish_reason="stop" even when tool calls were made.
+    // Override to "tool_use" when we know tools were emitted.
+    let stopReason = FINISH_REASON_MAP[finish_reason] || 'end_turn'
+    if (state.hasToolCalls && stopReason === 'end_turn') {
+      stopReason = 'tool_use'
+    }
+
     events.push({
       type: 'message_delta',
       delta: {
-        stop_reason: FINISH_REASON_MAP[finish_reason] || 'end_turn',
+        stop_reason: stopReason,
       },
       usage: {
         input_tokens: chunk.usage?.prompt_tokens ?? 0,

@@ -43,7 +43,29 @@ esac
 #
 #   Fallback: Claude → Gemini → TurboQuant
 #
-SETTINGS='{"modelRouter":{"enabled":true,"default":"gemini/gemini-3.1-pro-preview","providers":{"gemini":{"type":"openai-compatible","baseUrl":"https://generativelanguage.googleapis.com/v1beta/openai","models":["gemini-3.1-pro-preview","gemini-3-flash-preview","gemini-3.1-flash-lite-preview"]},"ollama":{"type":"openai-compatible","baseUrl":"http://localhost:11434/v1","models":["deepseek-coder-v2","qwen2.5:0.5b","qwen-opus-distill","gemma4-heretic"]},"tq":{"type":"openai-compatible","baseUrl":"http://localhost:8322/v1","models":["mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit","mlx-community/Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit"]}},"routes":[{"tasks":["file_search","grep","glob","file_read"],"model":"tq/mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit"},{"tasks":["simple_edit"],"model":"tq/mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit"},{"tasks":["test_execution"],"model":"gemini/gemini-3.1-flash-lite-preview"},{"tasks":["large_context"],"model":"gemini/gemini-3.1-pro-preview"},{"tasks":["subagent"],"model":"gemini/gemini-3-flash-preview"},{"tasks":["complex_reasoning","planning"],"model":"claude-opus-4-6"}],"fallbackChain":["claude-sonnet-4-6","gemini/gemini-3.1-pro-preview","gemini/gemini-3.1-flash-lite-preview"]}}'
+SMART_SETTINGS='{"modelRouter":{"enabled":true,"default":"gemini/gemini-3.1-pro-preview","providers":{"gemini":{"type":"openai-compatible","baseUrl":"https://generativelanguage.googleapis.com/v1beta/openai","models":["gemini-3.1-pro-preview","gemini-3-flash-preview","gemini-3.1-flash-lite-preview"]},"ollama":{"type":"openai-compatible","baseUrl":"http://localhost:11434/v1","models":["deepseek-coder-v2","qwen2.5:0.5b","qwen-opus-distill","gemma4-heretic"]},"tq":{"type":"openai-compatible","baseUrl":"http://localhost:8322/v1","models":["mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit","mlx-community/Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit"]}},"routes":[{"tasks":["file_search","grep","glob","file_read"],"model":"tq/mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit"},{"tasks":["simple_edit"],"model":"tq/mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit"},{"tasks":["test_execution"],"model":"gemini/gemini-3.1-flash-lite-preview"},{"tasks":["large_context"],"model":"gemini/gemini-3.1-pro-preview"},{"tasks":["subagent"],"model":"gemini/gemini-3-flash-preview"},{"tasks":["complex_reasoning","planning"],"model":"claude-opus-4-6"}],"fallbackChain":["claude-sonnet-4-6","gemini/gemini-3.1-pro-preview","gemini/gemini-3.1-flash-lite-preview"]}}'
+
+# When a specific model is chosen (not smart), route ALL tasks to that model
+if [ "$MODEL_ALIAS" = "smart" ] || [ "$MODEL_ALIAS" = "-p" ]; then
+  SETTINGS="$SMART_SETTINGS"
+else
+  # Determine provider name and model for the chosen model
+  PROVIDER_NAME="${MODEL%%/*}"
+  MODEL_ID="${MODEL#*/}"
+  if [ "$PROVIDER_NAME" = "$MODEL" ]; then
+    # No slash — native Anthropic model (e.g. claude-opus-4-6)
+    SETTINGS='{"modelRouter":{"enabled":false}}'
+  else
+    # External provider — route everything to this one model
+    case "$PROVIDER_NAME" in
+      ollama)  BASE_URL="http://localhost:11434/v1" ;;
+      tq)      BASE_URL="http://localhost:8322/v1" ;;
+      gemini)  BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai" ;;
+      *)       BASE_URL="http://localhost:11434/v1" ;;
+    esac
+    SETTINGS="{\"modelRouter\":{\"enabled\":true,\"default\":\"$MODEL\",\"providers\":{\"$PROVIDER_NAME\":{\"type\":\"openai-compatible\",\"baseUrl\":\"$BASE_URL\",\"models\":[\"$MODEL_ID\"]}},\"routes\":[{\"tasks\":[\"file_search\",\"grep\",\"glob\",\"file_read\",\"simple_edit\",\"test_execution\",\"large_context\",\"subagent\",\"complex_reasoning\",\"planning\"],\"model\":\"$MODEL\"}],\"fallbackChain\":[]}}"
+  fi
+fi
 
 export CLAUDE_CODE_SKIP_VERSION_CHECK=1
 export ANTHROPIC_MODEL="$MODEL"

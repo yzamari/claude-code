@@ -245,6 +245,14 @@ export function createOpenAICompatibleClient(config: OpenAIClientConfig) {
               body.tools = openAITools
             }
 
+            // For local models, use a generous 10-minute timeout instead of the
+            // default ~4min SDK timeout. Local models with "thinking" can take
+            // several minutes before producing the first token.
+            const isLocal = config.baseUrl?.match(/localhost|127\.0\.0\.1/) !== null
+            const fetchSignal = isLocal
+              ? AbortSignal.timeout(600_000) // 10 minutes for local models
+              : options?.signal
+
             let response: Response
             try {
               response = await fetch(`${config.baseUrl}/chat/completions`, {
@@ -254,7 +262,7 @@ export function createOpenAICompatibleClient(config: OpenAIClientConfig) {
                   ...(options?.headers ?? {}),
                 },
                 body: JSON.stringify(body),
-                signal: options?.signal,
+                signal: fetchSignal,
               })
             } catch (fetchError) {
               throw new OpenAICompatibleAPIError(

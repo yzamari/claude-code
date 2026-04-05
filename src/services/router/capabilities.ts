@@ -131,6 +131,13 @@ const KNOWN_CAPABILITIES: Record<string, Partial<ModelCapabilities>> = {
     supportsEffort: false, supportsCaching: false, supportsPDFs: false,
     toolCallStyle: 'none',
   },
+  // Qwen 3.5 40B Opus-distilled Heretic MLX — uncensored, fast on Apple Silicon
+  'TheCluster/Qwen3.5-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-MLX-mxfp4': {
+    maxInputTokens: 32_768, maxOutputTokens: 8192,
+    supportsTools: false, supportsVision: false, supportsThinking: false,
+    supportsEffort: false, supportsCaching: false, supportsPDFs: false,
+    toolCallStyle: 'none',
+  },
   // Ollama GGUF variant of the Opus-distilled Qwen model
   'qwen-opus-distill': {
     maxInputTokens: 32_768, maxOutputTokens: 8192,

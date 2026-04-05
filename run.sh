@@ -57,7 +57,7 @@ ensure_llama_server() {
       --model "$GGUF_PATH" \
       --port $LLAMA_PORT \
       --n-gpu-layers 999 \
-      --ctx-size 32768 \
+      --ctx-size 131072 \
       --threads 8 \
       --parallel 1 \
       --reasoning-budget 0 \

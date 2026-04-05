@@ -80,6 +80,18 @@ async function* openAIStreamToAnthropicStream(
         ?? (delta as any)?.reasoning
       if (textContent) {
         fullText += textContent
+
+        // Loop detection: if the model is repeating the same pattern, abort
+        // Check every 2000 chars to avoid overhead
+        if (fullText.length > 4000 && fullText.length % 2000 < 50) {
+          const last1k = fullText.slice(-1000)
+          const prev1k = fullText.slice(-2000, -1000)
+          if (last1k === prev1k) {
+            // Model is stuck in a loop — truncate and stop
+            fullText = fullText.slice(0, fullText.length - 1000)
+            break
+          }
+        }
       }
 
       const events = translateOpenAIChunkToAnthropicEvents(chunk, translationState)

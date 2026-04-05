@@ -50,6 +50,7 @@ async function* openAIStreamToAnthropicStream(
   let fullText = ''
   let deferredMessageDelta: unknown = null
   let loopWasDetected = false
+  let specialTokenCount = 0
 
   while (true) {
     const { done, value } = await reader.read()
@@ -116,12 +117,13 @@ async function* openAIStreamToAnthropicStream(
           }
         }
 
-        // Strategy 3: model special token flood (Gemma thinking loop, Llama/Qwen
-        // chat template leaks, etc.) — if >15 special tokens appear, the model
-        // is stuck outputting control tokens instead of real content
-        if (!loopDetected && fullText.length % 200 < 50) {
-          const specialCount = (fullText.match(/<\|[\w]+>|<\/?\w+\|>|<\|[^>]*\|>|\[\/?INST\]/g) || []).length
-          if (specialCount > 15) {
+        // Strategy 3: incremental special token counting (Gemma thinking loop,
+        // Llama/Qwen chat template leaks, etc.) — checked every chunk for
+        // instant detection instead of periodic scanning
+        if (!loopDetected) {
+          const newSpecial = (textContent.match(/<\|[\w]+>|<\/?\w+\|>|<\|[^>]*\|>|\[\/?INST\]/g) || []).length
+          specialTokenCount += newSpecial
+          if (specialTokenCount > 15) {
             fullText = ''
             loopDetected = true
           }

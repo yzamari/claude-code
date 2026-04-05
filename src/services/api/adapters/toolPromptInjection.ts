@@ -70,7 +70,7 @@ export function injectToolsIntoSystemPrompt(
     '- One tool call per fenced block. You may use multiple blocks in one response.',
     '- Do NOT hallucinate or roleplay tool results. Wait for the actual result.',
     '- If a tool call fails, try a different approach. Do NOT retry the same call.',
-    '- Maximum 3 tool calls per response.',
+    '- Maximum 10 tool calls per response.',
     '',
     `Available tools (${tools.length}):\n`,
     toolDescriptions,
@@ -184,6 +184,6 @@ export function parseToolCallsFromText(text: string): ParsedToolCall[] {
     } catch { /* skip malformed */ }
   }
 
-  // Limit to first 3 unique tool calls to prevent runaway execution
-  return calls.slice(0, 3)
+  // Limit to first 10 unique tool calls to prevent runaway execution
+  return calls.slice(0, 10)
 }

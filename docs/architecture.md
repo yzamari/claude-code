@@ -272,6 +272,35 @@ Wraps every external model call with a retry chain. On failure (connection error
 empty response, etc.), it buffers events and tries the next model in `fallbackChain`
 sequentially until one succeeds.
 
+### Per-Model Display Labels (`src/components/MessageModel.tsx`)
+
+Every assistant response shows a colored model label (`▍ Model Name`) above the response
+text. The model ID comes from the API response's `message.model` field (or from the
+`message_start` event for external providers via `StreamTranslator`). The `MessageModel`
+component renders the label with a color unique to each model family:
+
+| Model Family | Color |
+|-------------|-------|
+| Opus | `#D4A0FF` (purple) |
+| Sonnet | `#7EB8FF` (blue) |
+| Haiku | `#7FFFB2` (green) |
+| Gemini / Gemma | `#4ECDC4` (teal) |
+| GPT / OpenAI | `#74AA9C` (green) |
+| LLaMA | `#0084FF` (blue) |
+| Mistral | `#FF7000` (orange) |
+
+`MessageRow.tsx` injects the label for all assistant messages that have a non-synthetic
+model. Synthetic messages (internal plumbing) are filtered via the `SYNTHETIC_MODEL`
+constant.
+
+### Agent Model Selection (`src/utils/model/agent.ts`)
+
+Agents can use any model, not just Anthropic aliases. The `getAgentModel()` function
+resolves models in priority order: tool-specified model > agent definition model >
+`CLAUDE_CODE_SUBAGENT_MODEL` env var > `'inherit'` (parent model). The Agent tool's
+`model` parameter accepts arbitrary strings (`z.string()`) to support external provider
+models like `ollama/gemma-heretic-27b` or `openai/gpt-4o`.
+
 ---
 
 ## Adapter and Stream Translation Layer

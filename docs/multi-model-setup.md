@@ -671,6 +671,73 @@ Use OpenRouter as a single gateway to access many models.
 
 ---
 
+## Per-Model Display Labels
+
+Every assistant response shows a **colored model label** above it so you can always see which model produced it. Each model family has a distinct color:
+
+- **Opus** — purple (`#D4A0FF`)
+- **Sonnet** — blue (`#7EB8FF`)
+- **Haiku** — green (`#7FFFB2`)
+- **Gemini / Gemma** — teal (`#4ECDC4`)
+- **GPT / OpenAI** — green (`#74AA9C`)
+- **LLaMA** — blue (`#0084FF`)
+- **Mistral / Codestral** — orange (`#FF7000`)
+- **Qwen** — purple (`#615EFF`)
+- **DeepSeek** — blue (`#4D6BFF`)
+
+This is especially useful when multiple agents run concurrently with different models — you can tell at a glance which model handled each step.
+
+**Key files:** `src/components/MessageModel.tsx` (color + rendering), `src/components/MessageRow.tsx` (label injection)
+
+---
+
+## Agents with Different Models
+
+Each agent (subagent) can use a different model. There are three ways to control which model an agent uses:
+
+### 1. Tool-specified model (per invocation)
+
+When spawning an agent, pass the `model` parameter with any model alias or full provider/model spec:
+
+```
+Agent(prompt="audit the code", model="opus")
+Agent(prompt="search for patterns", model="ollama/gemma-heretic-27b")
+Agent(prompt="analyze architecture", model="openai/gpt-4o")
+```
+
+### 2. Agent definition model (per agent type)
+
+Custom agents in `.claude/agents/` can specify a `model` in their YAML frontmatter:
+
+```yaml
+---
+name: security-auditor
+model: opus
+---
+Perform a security audit of the code...
+```
+
+### 3. Automatic routing via the router
+
+When no model is explicitly specified, the router's task classifier categorizes the agent's work as `subagent` and routes it to whatever model is configured for that task type:
+
+```json
+{
+  "routes": [
+    { "tasks": ["subagent"], "model": "ollama/gemma-heretic-27b" }
+  ]
+}
+```
+
+### Model Resolution Priority
+
+1. **Tool-specified model** (highest) — `model` parameter in Agent tool call
+2. **Agent definition model** — `model` field in `.md` frontmatter
+3. **Environment override** — `CLAUDE_CODE_SUBAGENT_MODEL` env var
+4. **Default** — `'inherit'` (uses parent's model)
+
+---
+
 ## Architecture Overview
 
 For technical details on how the multi-model router integrates with the Claude Code codebase, see the [Multi-Model Router section in the Architecture Guide](architecture.md#multi-model-router).
@@ -686,3 +753,5 @@ For technical details on how the multi-model router integrates with the Claude C
 | `src/services/api/adapters/OpenAIAdapter.ts` | Anthropic-to-OpenAI message and stream format translation |
 | `src/services/api/adapters/GeminiAdapter.ts` | Anthropic-to-Gemini message and stream format translation |
 | `src/services/api/adapters/StreamTranslator.ts` | SSE event translation (OpenAI chunks to Anthropic events) |
+| `src/components/MessageModel.tsx` | Per-model colored label rendering |
+| `src/utils/model/agent.ts` | Agent model resolution (priority hierarchy) |

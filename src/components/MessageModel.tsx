@@ -2,42 +2,87 @@ import { c as _c } from "react/compiler-runtime";
 import React from 'react';
 import { stringWidth } from '../ink/stringWidth.js';
 import { Box, Text } from '../ink.js';
-import type { NormalizedMessage } from '../types/message.js';
+import type { NormalizedMessage, RenderableMessage } from '../types/message.js';
+import { renderModelName } from '../utils/model/model.js';
+import { SYNTHETIC_MODEL } from '../utils/messages.js';
 type Props = {
-  message: NormalizedMessage;
+  message: NormalizedMessage | RenderableMessage;
   isTranscriptMode: boolean;
 };
-export function MessageModel(t0) {
-  const $ = _c(5);
+
+/**
+ * Returns a hex color for the model based on its family/provider.
+ * Each model family gets a distinct color so users can visually
+ * distinguish which model produced each response.
+ */
+function getModelColor(model: string): string {
+  const m = model.toLowerCase();
+  // Anthropic models
+  if (m.includes('opus')) return '#D4A0FF';
+  if (m.includes('sonnet')) return '#7EB8FF';
+  if (m.includes('haiku')) return '#7FFFB2';
+  // Google models
+  if (m.includes('gemini') || m.includes('gemma')) return '#4ECDC4';
+  // OpenAI models
+  if (m.includes('gpt') || m.includes('o1') || m.includes('o3') || m.includes('o4')) return '#74AA9C';
+  // Meta models
+  if (m.includes('llama')) return '#0084FF';
+  // Mistral models
+  if (m.includes('mistral') || m.includes('codestral') || m.includes('mixtral')) return '#FF7000';
+  // Qwen models
+  if (m.includes('qwen')) return '#615EFF';
+  // DeepSeek models
+  if (m.includes('deepseek')) return '#4D6BFF';
+  // Microsoft models
+  if (m.includes('phi')) return '#0078D4';
+  // Cohere models
+  if (m.includes('command')) return '#D18EE2';
+  // Default gray
+  return '#888888';
+}
+
+export function MessageModel(t0: Props) {
+  const $ = _c(8);
   const {
     message,
     isTranscriptMode
   } = t0;
-  const shouldShowModel = isTranscriptMode && message.type === "assistant" && message.message.model && message.message.content.some(_temp);
-  if (!shouldShowModel) {
-    return null;
+
+  // Only show for assistant messages with a real (non-synthetic) model
+  if (message.type !== 'assistant') return null;
+  const model = message.message.model;
+  if (!model || model === SYNTHETIC_MODEL) return null;
+  if (!message.message.content.some(_temp)) return null;
+
+  const displayName = renderModelName(model);
+  const color = getModelColor(model);
+
+  if (isTranscriptMode) {
+    const t1 = stringWidth(displayName) + 8;
+    let t2;
+    if ($[0] !== displayName || $[1] !== color) {
+      t2 = <Box minWidth={t1}><Text color={color}>{displayName}</Text></Box>;
+      $[0] = displayName;
+      $[1] = color;
+      $[2] = t2;
+    } else {
+      t2 = $[2];
+    }
+    return t2;
   }
-  const t1 = stringWidth(message.message.model) + 8;
-  let t2;
-  if ($[0] !== message.message.model) {
-    t2 = <Text dimColor={true}>{message.message.model}</Text>;
-    $[0] = message.message.model;
-    $[1] = t2;
-  } else {
-    t2 = $[1];
-  }
+
+  // Normal mode: colored model label above the response
   let t3;
-  if ($[2] !== t1 || $[3] !== t2) {
-    t3 = <Box minWidth={t1}>{t2}</Box>;
-    $[2] = t1;
-    $[3] = t2;
-    $[4] = t3;
+  if ($[3] !== displayName || $[4] !== color) {
+    t3 = <Box><Text color={color}>{'▍'} {displayName}</Text></Box>;
+    $[3] = displayName;
+    $[4] = color;
+    $[5] = t3;
   } else {
-    t3 = $[4];
+    t3 = $[5];
   }
   return t3;
 }
-function _temp(c) {
+function _temp(c: { type: string }) {
   return c.type === "text";
 }
-//# sourceMappingURL=data:application/json;charset=utf-8;base64,eyJ2ZXJzaW9uIjozLCJuYW1lcyI6WyJSZWFjdCIsInN0cmluZ1dpZHRoIiwiQm94IiwiVGV4dCIsIk5vcm1hbGl6ZWRNZXNzYWdlIiwiUHJvcHMiLCJtZXNzYWdlIiwiaXNUcmFuc2NyaXB0TW9kZSIsIk1lc3NhZ2VNb2RlbCIsInQwIiwiJCIsIl9jIiwic2hvdWxkU2hvd01vZGVsIiwidHlwZSIsIm1vZGVsIiwiY29udGVudCIsInNvbWUiLCJfdGVtcCIsInQxIiwidDIiLCJ0MyIsImMiXSwic291cmNlcyI6WyJNZXNzYWdlTW9kZWwudHN4Il0sInNvdXJjZXNDb250ZW50IjpbImltcG9ydCBSZWFjdCBmcm9tICdyZWFjdCdcbmltcG9ydCB7IHN0cmluZ1dpZHRoIH0gZnJvbSAnLi4vaW5rL3N0cmluZ1dpZHRoLmpzJ1xuaW1wb3J0IHsgQm94LCBUZXh0IH0gZnJvbSAnLi4vaW5rLmpzJ1xuaW1wb3J0IHR5cGUgeyBOb3JtYWxpemVkTWVzc2FnZSB9IGZyb20gJy4uL3R5cGVzL21lc3NhZ2UuanMnXG5cbnR5cGUgUHJvcHMgPSB7XG4gIG1lc3NhZ2U6IE5vcm1hbGl6ZWRNZXNzYWdlXG4gIGlzVHJhbnNjcmlwdE1vZGU6IGJvb2xlYW5cbn1cblxuZXhwb3J0IGZ1bmN0aW9uIE1lc3NhZ2VNb2RlbCh7XG4gIG1lc3NhZ2UsXG4gIGlzVHJhbnNjcmlwdE1vZGUsXG59OiBQcm9wcyk6IFJlYWN0LlJlYWN0Tm9kZSB7XG4gIGNvbnN0IHNob3VsZFNob3dNb2RlbCA9XG4gICAgaXNUcmFuc2NyaXB0TW9kZSAmJlxuICAgIG1lc3NhZ2UudHlwZSA9PT0gJ2Fzc2lzdGFudCcgJiZcbiAgICBtZXNzYWdlLm1lc3NhZ2UubW9kZWwgJiZcbiAgICBtZXNzYWdlLm1lc3NhZ2UuY29udGVudC5zb21lKGMgPT4gYy50eXBlID09PSAndGV4dCcpXG5cbiAgaWYgKCFzaG91bGRTaG93TW9kZWwpIHtcbiAgICByZXR1cm4gbnVsbFxuICB9XG5cbiAgcmV0dXJuIChcbiAgICA8Qm94IG1pbldpZHRoPXtzdHJpbmdXaWR0aChtZXNzYWdlLm1lc3NhZ2UubW9kZWwpICsgOH0+XG4gICAgICA8VGV4dCBkaW1Db2xvcj57bWVzc2FnZS5tZXNzYWdlLm1vZGVsfTwvVGV4dD5cbiAgICA8L0JveD5cbiAgKVxufVxuIl0sIm1hcHBpbmdzIjoiO0FBQUEsT0FBT0EsS0FBSyxNQUFNLE9BQU87QUFDekIsU0FBU0MsV0FBVyxRQUFRLHVCQUF1QjtBQUNuRCxTQUFTQyxHQUFHLEVBQUVDLElBQUksUUFBUSxXQUFXO0FBQ3JDLGNBQWNDLGlCQUFpQixRQUFRLHFCQUFxQjtBQUU1RCxLQUFLQyxLQUFLLEdBQUc7RUFDWEMsT0FBTyxFQUFFRixpQkFBaUI7RUFDMUJHLGdCQUFnQixFQUFFLE9BQU87QUFDM0IsQ0FBQztBQUVELE9BQU8sU0FBQUMsYUFBQUMsRUFBQTtFQUFBLE1BQUFDLENBQUEsR0FBQUMsRUFBQTtFQUFzQjtJQUFBTCxPQUFBO0lBQUFDO0VBQUEsSUFBQUUsRUFHckI7RUFDTixNQUFBRyxlQUFBLEdBQ0VMLGdCQUM0QixJQUE1QkQsT0FBTyxDQUFBTyxJQUFLLEtBQUssV0FDSSxJQUFyQlAsT0FBTyxDQUFBQSxPQUFRLENBQUFRLEtBQ3FDLElBQXBEUixPQUFPLENBQUFBLE9BQVEsQ0FBQVMsT0FBUSxDQUFBQyxJQUFLLENBQUNDLEtBQXNCLENBQUM7RUFFdEQsSUFBSSxDQUFDTCxlQUFlO0lBQUEsT0FDWCxJQUFJO0VBQUE7RUFJSSxNQUFBTSxFQUFBLEdBQUFqQixXQUFXLENBQUNLLE9BQU8sQ0FBQUEsT0FBUSxDQUFBUSxLQUFNLENBQUMsR0FBRyxDQUFDO0VBQUEsSUFBQUssRUFBQTtFQUFBLElBQUFULENBQUEsUUFBQUosT0FBQSxDQUFBQSxPQUFBLENBQUFRLEtBQUE7SUFDbkRLLEVBQUEsSUFBQyxJQUFJLENBQUMsUUFBUSxDQUFSLEtBQU8sQ0FBQyxDQUFFLENBQUFiLE9BQU8sQ0FBQUEsT0FBUSxDQUFBUSxLQUFLLENBQUUsRUFBckMsSUFBSSxDQUF3QztJQUFBSixDQUFBLE1BQUFKLE9BQUEsQ0FBQUEsT0FBQSxDQUFBUSxLQUFBO0lBQUFKLENBQUEsTUFBQVMsRUFBQTtFQUFBO0lBQUFBLEVBQUEsR0FBQVQsQ0FBQTtFQUFBO0VBQUEsSUFBQVUsRUFBQTtFQUFBLElBQUFWLENBQUEsUUFBQVEsRUFBQSxJQUFBUixDQUFBLFFBQUFTLEVBQUE7SUFEL0NDLEVBQUEsSUFBQyxHQUFHLENBQVcsUUFBc0MsQ0FBdEMsQ0FBQUYsRUFBcUMsQ0FBQyxDQUNuRCxDQUFBQyxFQUE0QyxDQUM5QyxFQUZDLEdBQUcsQ0FFRTtJQUFBVCxDQUFBLE1BQUFRLEVBQUE7SUFBQVIsQ0FBQSxNQUFBUyxFQUFBO0lBQUFULENBQUEsTUFBQVUsRUFBQTtFQUFBO0lBQUFBLEVBQUEsR0FBQVYsQ0FBQTtFQUFBO0VBQUEsT0FGTlUsRUFFTTtBQUFBO0FBakJILFNBQUFILE1BQUFJLENBQUE7RUFBQSxPQVErQkEsQ0FBQyxDQUFBUixJQUFLLEtBQUssTUFBTTtBQUFBIiwiaWdub3JlTGlzdCI6W119

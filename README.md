@@ -115,6 +115,23 @@ chmod +x install.sh
 
 `run.sh` auto-starts the required local server (llama-server, mlx_lm, or Ollama) — no manual setup needed.
 
+### Per-Model Display
+
+Every assistant response shows a **colored model label** so you always know which model produced it:
+
+| Model Family | Color | Example |
+|-------------|-------|---------|
+| Claude Opus | Purple | `▍ Opus 4.6` |
+| Claude Sonnet | Blue | `▍ Sonnet 4.6` |
+| Claude Haiku | Green | `▍ Haiku 4.5` |
+| Gemini / Gemma | Teal | `▍ gemma-heretic-27b` |
+| GPT / OpenAI | Green | `▍ gpt-4o` |
+| LLaMA | Blue | `▍ llama-3.1-70b` |
+| Mistral | Orange | `▍ codestral-latest` |
+| DeepSeek | Blue | `▍ deepseek-coder-v2` |
+
+When multiple agents run in parallel with different models, each agent's output is clearly labeled with its model and color.
+
 See [docs/multi-model-setup.md](docs/multi-model-setup.md) for full configuration guide.
 
 ---

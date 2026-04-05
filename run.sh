@@ -1,14 +1,26 @@
 #!/bin/bash
 # Claude Code Multi-Model Router
 # Usage:
-#   ./run.sh                  # Smart routing (Gemini + Claude + Local)
-#   ./run.sh heretic          # Uncensored local (llama.cpp Metal, fast)
-#   ./run.sh heretic-mlx      # Uncensored local (MLX TurboQuant, fastest)
-#   ./run.sh claude           # Force Claude Opus only
-#   ./run.sh gemini           # Force Gemini 3.1 Pro only
-#   ./run.sh -p "prompt"      # Print mode (non-interactive)
+#   ./run.sh                                    # Smart routing (Gemini + Claude + Local)
+#   ./run.sh heretic                            # Uncensored local (llama.cpp Metal, fast)
+#   ./run.sh heretic-mlx                        # Uncensored local (MLX TurboQuant, fastest)
+#   ./run.sh claude                             # Force Claude Opus only
+#   ./run.sh gemini                             # Force Gemini 3.1 Pro only
+#   ./run.sh -p "prompt"                        # Print mode (non-interactive)
+#   ./run.sh heretic --resume <session-id>      # Resume session with specific model
+#   ./run.sh smart --verbose --model opus       # Any claude flags are passed through
+#
+# All arguments after the model alias are forwarded to claude-code.
 
-MODEL_ALIAS="${1:-smart}"
+# If first arg starts with -- it's a flag, not a model alias
+if [ -z "$1" ] || [[ "$1" == --* ]]; then
+  MODEL_ALIAS="smart"
+  EXTRA_ARGS=("$@")
+else
+  MODEL_ALIAS="$1"
+  shift
+  EXTRA_ARGS=("$@")
+fi
 
 GGUF_PATH="$HOME/.ollama/models/blobs/sha256-92a767fc165395c69291768a53526dace172d23a44daef4cdd0f7a6175b7489b"
 LLAMA_PORT=8324
@@ -31,7 +43,7 @@ case "$MODEL_ALIAS" in
   sonnet)                 MODEL="claude-sonnet-4-6" ;;
   haiku)                  MODEL="claude-haiku-4-5-20251001" ;;
   smart)                  MODEL="gemini/gemini-3.1-pro-preview" ;;
-  -p)                     MODEL="gemini/gemini-3.1-pro-preview"; shift; PROMPT="$*" ;;
+  -p)                     MODEL="gemini/gemini-3.1-pro-preview"; PROMPT="${EXTRA_ARGS[*]}"; EXTRA_ARGS=() ;;
   *)                      MODEL="$MODEL_ALIAS" ;;
 esac
 
@@ -153,7 +165,7 @@ export CLAUDE_CODE_SKIP_VERSION_CHECK=1
 export ANTHROPIC_MODEL="$MODEL"
 
 if [ -n "$PROMPT" ]; then
-  exec bun dist/cli.mjs --bare --print --dangerously-skip-permissions --settings "$SETTINGS" "$PROMPT"
+  exec bun dist/cli.mjs --bare --print --dangerously-skip-permissions --settings "$SETTINGS" "$PROMPT" "${EXTRA_ARGS[@]}"
 else
   echo "╭──────────────────────────────────────────────────╮"
   echo "│  Claude Code Multi-Model Router                  │"
@@ -178,5 +190,5 @@ else
   echo "│  /model to switch manually                       │"
   echo "╰──────────────────────────────────────────────────╯"
   echo ""
-  exec bun dist/cli.mjs --dangerously-skip-permissions --settings "$SETTINGS"
+  exec bun dist/cli.mjs --dangerously-skip-permissions --settings "$SETTINGS" "${EXTRA_ARGS[@]}"
 fi

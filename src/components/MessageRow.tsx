@@ -6,7 +6,7 @@ import type { Screen } from '../screens/REPL.js';
 import type { Tools } from '../Tool.js';
 import type { RenderableMessage } from '../types/message.js';
 import { getDisplayMessageFromCollapsed, getToolSearchOrReadInfo, getToolUseIdsFromCollapsedGroup, hasAnyToolInProgress } from '../utils/collapseReadSearch.js';
-import { type buildMessageLookups, EMPTY_STRING_SET, getProgressMessagesFromLookup, getSiblingToolUseIDsFromLookup, getToolUseID } from '../utils/messages.js';
+import { type buildMessageLookups, EMPTY_STRING_SET, getProgressMessagesFromLookup, getSiblingToolUseIDsFromLookup, getToolUseID, SYNTHETIC_MODEL } from '../utils/messages.js';
 import { hasThinkingContent, Message } from './Message.js';
 import { MessageModel } from './MessageModel.js';
 import { shouldRenderStatically } from './Messages.js';
@@ -254,6 +254,14 @@ function MessageRowImpl(t0) {
   }
   const messageEl = t8;
   if (!hasMetadata) {
+    // Show colored model label for assistant messages with a real model
+    const showModelLabel = displayMsg.type === 'assistant' &&
+      displayMsg.message.model &&
+      displayMsg.message.model !== SYNTHETIC_MODEL &&
+      displayMsg.message.content.some(_temp);
+    if (showModelLabel) {
+      return <OffscreenFreeze><Box flexDirection="column"><MessageModel message={displayMsg} isTranscriptMode={false} />{messageEl}</Box></OffscreenFreeze>;
+    }
     let t9;
     if ($[55] !== messageEl) {
       t9 = <OffscreenFreeze>{messageEl}</OffscreenFreeze>;

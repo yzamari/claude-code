@@ -63,6 +63,11 @@ export class ModelRouter {
       }
     }
 
+    // User explicitly chose a model via /model — honour it directly
+    if (taskType === 'user_override' && context.userModelOverride) {
+      return this.resolveModelSpec(context.userModelOverride, taskType, fallbackChain)
+    }
+
     // Look up route for this task type
     const modelSpec = this.routeMap.get(taskType)
     if (!modelSpec) {
@@ -95,6 +100,35 @@ export class ModelRouter {
       model,
       providerName,
       providerConfig,
+      isNativeAnthropic: false,
+      taskType,
+      fallbackChain,
+    }
+  }
+
+  private resolveModelSpec(
+    spec: string,
+    taskType: TaskType,
+    fallbackChain: string[],
+  ): ResolvedRoute {
+    const { providerName, model } = parseModelSpec(spec)
+
+    if (!providerName || isAnthropicModel(model || spec)) {
+      return {
+        model: model || spec,
+        providerName: 'anthropic',
+        providerConfig: NATIVE_ANTHROPIC_PROVIDER,
+        isNativeAnthropic: true,
+        taskType,
+        fallbackChain,
+      }
+    }
+
+    const providerConfig = this.config.providers?.[providerName]
+    return {
+      model,
+      providerName,
+      providerConfig: providerConfig ?? NATIVE_ANTHROPIC_PROVIDER,
       isNativeAnthropic: false,
       taskType,
       fallbackChain,

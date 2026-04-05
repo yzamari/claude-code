@@ -98,18 +98,46 @@ describe('ModelRouter', () => {
     expect(resolved.model).toBe('claude-opus-4-6')
   })
 
-  it('handles user_override task type (no routing)', () => {
+  it('handles user_override by honouring the user-chosen model', () => {
     const context: TaskContext = {
       activeTools: [],
       messageTokenCount: 5000,
       isPlanMode: false,
       isSubagent: false,
-      userModelOverride: 'gpt-4o',
+      userModelOverride: 'openai/gpt-4o',
     }
     const resolved = router.resolve(context)
-    // user_override not in routes, so falls back to default
-    expect(resolved.model).toBe('claude-opus-4-6')
+    // user_override should use the user's chosen model, not the default
+    expect(resolved.model).toBe('gpt-4o')
+    expect(resolved.providerName).toBe('openai')
+    expect(resolved.isNativeAnthropic).toBe(false)
+  })
+
+  it('handles user_override with anthropic model', () => {
+    const context: TaskContext = {
+      activeTools: [],
+      messageTokenCount: 5000,
+      isPlanMode: false,
+      isSubagent: false,
+      userModelOverride: 'claude-sonnet-4-6',
+    }
+    const resolved = router.resolve(context)
+    expect(resolved.model).toBe('claude-sonnet-4-6')
     expect(resolved.isNativeAnthropic).toBe(true)
+  })
+
+  it('handles user_override with provider/model format', () => {
+    const context: TaskContext = {
+      activeTools: [],
+      messageTokenCount: 5000,
+      isPlanMode: false,
+      isSubagent: false,
+      userModelOverride: 'ollama/gemma4-heretic',
+    }
+    const resolved = router.resolve(context)
+    expect(resolved.model).toBe('gemma4-heretic')
+    expect(resolved.providerName).toBe('ollama')
+    expect(resolved.isNativeAnthropic).toBe(false)
   })
 
   it('parses provider/model format correctly', () => {

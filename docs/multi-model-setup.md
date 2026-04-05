@@ -246,6 +246,9 @@ pip install mlx-tq-server
 
 # Start the server (OpenAI-compatible endpoint)
 mlx-tq-server --model qwen2.5-32b-turboquant-3bit --port 8080
+
+# Or use the Opus-distilled Qwen model (Claude 4.6 Opus quality in 27B)
+mlx-tq-server --model mlx-community/Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit --port 8322
 ```
 
 **Provider config:**
@@ -253,10 +256,103 @@ mlx-tq-server --model qwen2.5-32b-turboquant-3bit --port 8080
 ```json
 "mlx-tq": {
   "type": "openai-compatible",
-  "baseUrl": "http://localhost:8080/v1",
-  "models": ["qwen2.5-32b-turboquant-3bit"]
+  "baseUrl": "http://localhost:8322/v1",
+  "models": ["mlx-community/Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit"]
 }
 ```
+
+### gemma4-heretic (Uncensored Local Model)
+
+An uncensored Gemma 4 variant with no content restrictions. Runs locally via Ollama with Claude Code's safety layer automatically stripped for localhost models.
+
+**Quick setup:**
+
+```bash
+chmod +x setup-heretic.sh
+./setup-heretic.sh
+```
+
+**Manual setup:**
+
+```bash
+# Install Ollama
+brew install ollama   # macOS
+ollama serve          # start server
+
+# Pull the model (~16 GB)
+ollama pull gemma4-heretic
+```
+
+**Run:**
+
+```bash
+./run.sh heretic
+# or
+./run.sh uncensored
+```
+
+**Provider config:**
+
+```json
+"ollama": {
+  "type": "openai-compatible",
+  "baseUrl": "http://localhost:11434/v1",
+  "models": ["gemma4-heretic"]
+}
+```
+
+**What makes it different:**
+- Claude Code's safety instructions are automatically stripped for all localhost models
+- The model receives a minimal system prompt with no content restrictions
+- All Claude Code tools remain available (file ops, bash, MCPs)
+- DuckDuckGo web search and Playwright browser available via MCP
+- Fully offline, no cloud API required
+
+---
+
+## Using Models
+
+### Quick Start: run.sh Aliases
+
+The fastest way to use any model:
+
+```bash
+./run.sh heretic        # gemma4-heretic (uncensored, local)
+./run.sh uncensored     # same as heretic
+./run.sh qwen-opus      # Qwen3.5-27B Opus-distilled (MLX)
+./run.sh qwen-opus-gguf # same model via Ollama (GGUF)
+./run.sh tq             # Qwen3-Coder-30B (MLX TurboQuant)
+./run.sh claude         # Claude Opus 4.6
+./run.sh sonnet         # Claude Sonnet 4.6
+./run.sh gemini         # Gemini 3.1 Pro
+./run.sh flash          # Gemini 3 Flash
+./run.sh ollama         # DeepSeek Coder v2 (Ollama)
+./run.sh smart          # Smart routing (default)
+```
+
+### Switching Models Mid-Session
+
+Use `/model` inside Claude Code to switch on the fly:
+
+```
+/model ollama/gemma4-heretic       # switch to heretic
+/model claude-opus-4-6             # switch to Claude
+/model gemini/gemini-3.1-pro       # switch to Gemini
+```
+
+### Local vs Cloud Model Behavior
+
+| Feature | Local (Ollama/MLX) | Cloud (Claude/Gemini/OpenAI) |
+|---------|-------------------|------------------------------|
+| Safety layer | Stripped | Active |
+| Web search | Via DuckDuckGo MCP | Built-in WebSearch |
+| Browser | Via Playwright MCP | Built-in WebFetch |
+| File tools | All available | All available |
+| Bash | Available | Available |
+| Tool calling | Injected into system prompt | Native API support |
+| Cost | Free | Per-token pricing |
+| Speed | Depends on hardware | Fast (cloud) |
+| Offline | Yes | No |
 
 ---
 

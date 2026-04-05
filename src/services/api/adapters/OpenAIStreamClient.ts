@@ -6,6 +6,7 @@
  */
 
 import { randomUUID } from 'crypto'
+import { logForDebugging } from '../../../utils/debug.js'
 import {
   translateAnthropicToOpenAI,
   translateSystemPrompt,
@@ -45,8 +46,7 @@ async function* openAIStreamToAnthropicStream(
 
   const decoder = new TextDecoder()
   let buffer = ''
-  let blockIndex = 0
-  let isFirstTextChunk = true
+  const translationState = { blockIndex: 0, isFirstChunk: true, hasToolCalls: false }
   let fullText = ''
   let deferredMessageDelta: unknown = null
 
@@ -77,10 +77,7 @@ async function* openAIStreamToAnthropicStream(
         fullText += textContent
       }
 
-      const events = translateOpenAIChunkToAnthropicEvents(chunk, {
-        blockIndex,
-        isFirstChunk: isFirstTextChunk,
-      })
+      const events = translateOpenAIChunkToAnthropicEvents(chunk, translationState)
 
       for (const event of events) {
         // Defer message_delta so we can modify stop_reason if tool calls are found
@@ -90,10 +87,10 @@ async function* openAIStreamToAnthropicStream(
         }
         yield event
         if (event.type === 'content_block_start') {
-          isFirstTextChunk = false
+          translationState.isFirstChunk = false
         }
         if (event.type === 'content_block_stop') {
-          blockIndex++
+          translationState.blockIndex++
         }
       }
     }
@@ -105,10 +102,10 @@ async function* openAIStreamToAnthropicStream(
   if (parsedCalls.length > 0) {
     // Emit synthetic tool_use content blocks
     for (const call of parsedCalls) {
-      yield { type: 'content_block_start', index: blockIndex, content_block: { type: 'tool_use', id: call.id, name: call.name, input: {} } }
-      yield { type: 'content_block_delta', index: blockIndex, delta: { type: 'input_json_delta', partial_json: JSON.stringify(call.input) } }
-      yield { type: 'content_block_stop', index: blockIndex }
-      blockIndex++
+      yield { type: 'content_block_start', index: translationState.blockIndex, content_block: { type: 'tool_use', id: call.id, name: call.name, input: {} } }
+      yield { type: 'content_block_delta', index: translationState.blockIndex, delta: { type: 'input_json_delta', partial_json: JSON.stringify(call.input) } }
+      yield { type: 'content_block_stop', index: translationState.blockIndex }
+      translationState.blockIndex++
     }
     // Override the stop reason to tool_use
     if (deferredMessageDelta) {
@@ -118,6 +115,19 @@ async function* openAIStreamToAnthropicStream(
         delta: { ...md.delta, stop_reason: 'tool_use' },
       }
     }
+  }
+
+  // Empty response detection: if the model returned no content at all (no text,
+  // no tool calls), the UI would render a blank message. Throw so the fallback
+  // executor can try the next model in the chain instead of silently swallowing it.
+  const hasContent = !translationState.isFirstChunk || parsedCalls.length > 0 || translationState.blockIndex > 0
+  if (!hasContent) {
+    throw new OpenAICompatibleAPIError(
+      0,
+      `External model "${model}" returned an empty response with no content blocks. ` +
+        'This typically means the model refused the request or the provider returned an empty stream.',
+      new Headers(),
+    )
   }
 
   // Emit the deferred message_delta (with possibly updated stop_reason)
@@ -163,8 +173,10 @@ export function createOpenAICompatibleClient(config: OpenAIClientConfig) {
             const system = params.system as Array<{ type: 'text'; text: string }> | undefined
             const tools = params.tools as Array<{ name: string; description: string; input_schema: Record<string, unknown> }> | undefined
 
+            // Strip safety layer for local models (localhost endpoints)
+            const isLocalModel = config.baseUrl?.match(/localhost|127\.0\.0\.1/) !== null
             const openAIMessages = [
-              ...(system ? [translateSystemPrompt(system)] : []),
+              ...(system ? [translateSystemPrompt(system, { stripSafetyLayer: isLocalModel })] : []),
               ...translateAnthropicToOpenAI(messages as any),
             ]
 
@@ -213,6 +225,10 @@ export function createOpenAICompatibleClient(config: OpenAIClientConfig) {
                 openAIMessages.unshift(injectToolsIntoSystemPrompt({ role: 'system', content: '' } as any, translatedTools) as any)
               }
             }
+
+            logForDebugging(
+              `[ExternalModel] → ${config.baseUrl} model=${config.model} maxTokens=${maxTokens} tools=${openAITools?.length ?? 0}`,
+            )
 
             const body: Record<string, unknown> = {
               model: config.model,

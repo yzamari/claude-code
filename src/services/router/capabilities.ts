@@ -70,6 +70,24 @@ const KNOWN_CAPABILITIES: Record<string, Partial<ModelCapabilities>> = {
     supportsEffort: false, supportsCaching: false, supportsPDFs: false,
     toolCallStyle: 'openai',
   },
+  'gemini-3.1-pro': {
+    maxInputTokens: 2_000_000, maxOutputTokens: 65_536,
+    supportsTools: true, supportsVision: true, supportsThinking: false,
+    supportsEffort: false, supportsCaching: false, supportsPDFs: true,
+    toolCallStyle: 'openai',
+  },
+  'gemini-3.1-flash': {
+    maxInputTokens: 1_000_000, maxOutputTokens: 65_536,
+    supportsTools: true, supportsVision: true, supportsThinking: false,
+    supportsEffort: false, supportsCaching: false, supportsPDFs: false,
+    toolCallStyle: 'openai',
+  },
+  'gemini-3.1-flash-lite': {
+    maxInputTokens: 1_000_000, maxOutputTokens: 32_768,
+    supportsTools: true, supportsVision: true, supportsThinking: false,
+    supportsEffort: false, supportsCaching: false, supportsPDFs: false,
+    toolCallStyle: 'openai',
+  },
   // Local models (common Ollama defaults)
   'llama3': {
     maxInputTokens: 128_000, maxOutputTokens: 4096,
@@ -85,6 +103,37 @@ const KNOWN_CAPABILITIES: Record<string, Partial<ModelCapabilities>> = {
   },
   'deepseek-coder-v2': {
     maxInputTokens: 128_000, maxOutputTokens: 4096,
+    supportsTools: false, supportsVision: false, supportsThinking: false,
+    supportsEffort: false, supportsCaching: false, supportsPDFs: false,
+    toolCallStyle: 'none',
+  },
+  // MLX TurboQuant local models (via mlx-lm server)
+  // mlx-lm does NOT support OpenAI tool calling — tools in the request body
+  // are silently ignored. Set supportsTools:false so the adapter injects tool
+  // descriptions into the system prompt and parseToolCallsFromText extracts
+  // tool calls from the model's text output.
+  'mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit': {
+    maxInputTokens: 32_768, maxOutputTokens: 8192,
+    supportsTools: false, supportsVision: false, supportsThinking: false,
+    supportsEffort: false, supportsCaching: false, supportsPDFs: false,
+    toolCallStyle: 'none',
+  },
+  'mlx-community/Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit': {
+    maxInputTokens: 32_768, maxOutputTokens: 8192,
+    supportsTools: false, supportsVision: false, supportsThinking: false,
+    supportsEffort: false, supportsCaching: false, supportsPDFs: false,
+    toolCallStyle: 'none',
+  },
+  // Gemma 4 Heretic — uncensored Gemma 4 variant (Ollama GGUF)
+  'gemma4-heretic': {
+    maxInputTokens: 128_000, maxOutputTokens: 8192,
+    supportsTools: false, supportsVision: false, supportsThinking: false,
+    supportsEffort: false, supportsCaching: false, supportsPDFs: false,
+    toolCallStyle: 'none',
+  },
+  // Ollama GGUF variant of the Opus-distilled Qwen model
+  'qwen-opus-distill': {
+    maxInputTokens: 32_768, maxOutputTokens: 8192,
     supportsTools: false, supportsVision: false, supportsThinking: false,
     supportsEffort: false, supportsCaching: false, supportsPDFs: false,
     toolCallStyle: 'none',

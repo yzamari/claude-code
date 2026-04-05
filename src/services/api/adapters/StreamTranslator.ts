@@ -61,8 +61,13 @@ export function translateOpenAIChunkToAnthropicEvents(
 
   const { delta, finish_reason } = choice
 
-  // Text content — some models (e.g. gemma4-heretic) put output in "reasoning" instead of "content"
-  const textContent = (delta.content != null && delta.content !== '' ? delta.content : null)
+  // Text content — models use different fields:
+  //   - standard: delta.content
+  //   - Ollama thinking models: delta.reasoning (content is "")
+  //   - llama.cpp thinking models: delta.reasoning_content (content has the answer)
+  const rawContent = delta.content
+  const textContent = (rawContent != null && rawContent !== '' ? rawContent : null)
+    ?? (delta as any).reasoning_content
     ?? (delta as any).reasoning
     ?? null
   if (textContent != null && textContent !== '') {

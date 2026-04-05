@@ -17,7 +17,7 @@ case "$MODEL_ALIAS" in
   ollama|deepseek)        MODEL="ollama/deepseek-coder-v2" ;;
   qwen)                   MODEL="ollama/qwen2.5:0.5b" ;;
   qwen-opus-gguf)         MODEL="ollama/qwen-opus-distill" ;;
-  heretic|uncensored)     MODEL="ollama/gemma4-heretic" ;;
+  heretic|uncensored)     MODEL="llama/gemma4-heretic" ;;
   heretic-mlx|fast-heretic) MODEL="tq/TheCluster/Qwen3.5-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-MLX-mxfp4" ;;
   tq|turboquant)          MODEL="tq/mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit" ;;
   qwen-opus|opus-distill) MODEL="tq/mlx-community/Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit" ;;
@@ -61,6 +61,7 @@ else
     case "$PROVIDER_NAME" in
       ollama)  BASE_URL="http://localhost:11434/v1" ;;
       tq)      BASE_URL="http://localhost:8323/v1" ;;
+      llama)   BASE_URL="http://localhost:8324/v1" ;;
       gemini)  BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai" ;;
       *)       BASE_URL="http://localhost:11434/v1" ;;
     esac

@@ -124,7 +124,7 @@ const KNOWN_CAPABILITIES: Record<string, Partial<ModelCapabilities>> = {
     supportsEffort: false, supportsCaching: false, supportsPDFs: false,
     toolCallStyle: 'none',
   },
-  // Gemma 4 Heretic — uncensored Gemma 4 variant (Ollama GGUF)
+  // Gemma 4 Heretic — uncensored Gemma 4 variant (llama.cpp Metal / Ollama GGUF)
   'gemma4-heretic': {
     maxInputTokens: 128_000, maxOutputTokens: 8192,
     supportsTools: false, supportsVision: false, supportsThinking: false,

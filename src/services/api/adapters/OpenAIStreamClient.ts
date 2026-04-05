@@ -72,10 +72,11 @@ async function* openAIStreamToAnthropicStream(
       }
 
       // Accumulate full text for tool call parsing
-      // Some models (e.g. gemma4-heretic) put output in "reasoning" instead of "content"
+      // Models use different fields: content, reasoning (Ollama), reasoning_content (llama.cpp)
       const delta = chunk.choices[0]?.delta
       const rawContent = delta?.content
       const textContent = (rawContent != null && rawContent !== '' ? rawContent : null)
+        ?? (delta as any)?.reasoning_content
         ?? (delta as any)?.reasoning
       if (textContent) {
         fullText += textContent

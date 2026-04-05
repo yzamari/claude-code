@@ -304,6 +304,13 @@ async function* queryLoop(
     state.toolUseContext,
   )
 
+  // Turn-level loop detection: track tool call signatures across turns.
+  // If the model makes the same tool call pattern 3+ turns in a row, it's looping.
+  // This catches cross-turn loops that the stream-level detector can't see
+  // (each turn is unique enough in text, but the tool calls repeat).
+  const recentToolSignatures: string[] = []
+  const TURN_LOOP_THRESHOLD = 3
+
   // eslint-disable-next-line no-constant-condition
   while (true) {
     // Destructure state at the top of each iteration. toolUseContext alone
@@ -1748,6 +1755,38 @@ async function* queryLoop(
             ...toolResults,
           ],
         })
+      }
+    }
+
+    // Turn-level loop detection: if the model calls the same tools N turns in a row, stop.
+    // Build a signature from this turn's tool calls (name + sorted arg keys).
+    if (toolUseBlocks.length > 0) {
+      const sig = toolUseBlocks
+        .map(b => `${b.name}(${Object.keys(b.input ?? {}).sort().join(',')})`)
+        .sort()
+        .join(';')
+      recentToolSignatures.push(sig)
+      // Keep only the last N signatures
+      if (recentToolSignatures.length > TURN_LOOP_THRESHOLD + 1) {
+        recentToolSignatures.shift()
+      }
+      // Check if the last N signatures are identical
+      if (recentToolSignatures.length >= TURN_LOOP_THRESHOLD) {
+        const lastN = recentToolSignatures.slice(-TURN_LOOP_THRESHOLD)
+        if (lastN.every(s => s === lastN[0])) {
+          yield createAttachmentMessage({
+            type: 'max_turns_reached',
+            maxTurns: nextTurnCount,
+            turnCount: nextTurnCount,
+          })
+          // Inject a warning into the tool results so the model sees it if the loop is somehow continued
+          toolResults.push(
+            createUserMessage({
+              content: `[Turn-level loop detected: you have called the same tools (${sig}) for ${TURN_LOOP_THRESHOLD} consecutive turns. Stopping to prevent infinite looping. Try a completely different approach or ask the user for guidance.]`,
+            }),
+          )
+          return { reason: 'max_turns', turnCount: nextTurnCount }
+        }
       }
     }
 

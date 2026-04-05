@@ -42,7 +42,7 @@ describe('injectToolsIntoSystemPrompt', () => {
     expect(result.content).toContain('bash')
   })
 
-  it('limits to 20 tools', () => {
+  it('includes all tools with parameter info', () => {
     const tools = Array.from({ length: 40 }, (_, i) => ({
       type: 'function',
       function: {
@@ -57,7 +57,35 @@ describe('injectToolsIntoSystemPrompt', () => {
     )
     expect(result.content).toContain('tool_0')
     expect(result.content).toContain('tool_19')
-    expect(result.content).not.toContain('tool_20')
+    expect(result.content).toContain('tool_39')
+    expect(result.content).toContain('Available tools (40)')
+  })
+
+  it('includes parameter schemas in tool descriptions', () => {
+    const tools = [
+      {
+        type: 'function',
+        function: {
+          name: 'read_file',
+          description: 'Read a file',
+          parameters: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: 'File path to read' },
+              offset: { type: 'number', description: 'Line to start from' },
+            },
+            required: ['path'],
+          },
+        },
+      },
+    ]
+    const result = injectToolsIntoSystemPrompt(
+      { role: 'system', content: '' },
+      tools as Parameters<typeof injectToolsIntoSystemPrompt>[1],
+    )
+    expect(result.content).toContain('path (string, required)')
+    expect(result.content).toContain('offset (number)')
+    expect(result.content).toContain('File path to read')
   })
 })
 
@@ -103,5 +131,33 @@ describe('parseToolCallsFromText', () => {
     const calls = parseToolCallsFromText(text)
     expect(calls).toHaveLength(1)
     expect(calls[0].input).toEqual({})
+  })
+
+  it('deduplicates repeated identical Gemma tool calls (loop detection)', () => {
+    const call = '<|tool_call>call:Bash{command: "ls -la"}<tool_call|>'
+    const text = `${call}<|tool_response>${call}<|tool_response>${call}<|tool_response>${call}`
+    const calls = parseToolCallsFromText(text)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].name).toBe('Bash')
+  })
+
+  it('parses Gemma multi-argument tool calls (Agent-style)', () => {
+    const text = `<|tool_call>call:Agent{description: "test agent", prompt: "do the thing", subagent_type: "general-purpose"}<tool_call|>`
+    const calls = parseToolCallsFromText(text)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].name).toBe('Agent')
+    expect(calls[0].input).toHaveProperty('description')
+    expect(calls[0].input).toHaveProperty('prompt')
+  })
+
+  it('limits to 3 unique tool calls max', () => {
+    const text = [
+      '```tool_call\n{"tool": "a", "arguments": {"x": 1}}\n```',
+      '```tool_call\n{"tool": "b", "arguments": {"x": 2}}\n```',
+      '```tool_call\n{"tool": "c", "arguments": {"x": 3}}\n```',
+      '```tool_call\n{"tool": "d", "arguments": {"x": 4}}\n```',
+    ].join('\n')
+    const calls = parseToolCallsFromText(text)
+    expect(calls).toHaveLength(3)
   })
 })

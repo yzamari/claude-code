@@ -49,6 +49,7 @@ async function* openAIStreamToAnthropicStream(
   const translationState = { blockIndex: 0, isFirstChunk: true, hasToolCalls: false }
   let fullText = ''
   let deferredMessageDelta: unknown = null
+  let loopWasDetected = false
 
   while (true) {
     const { done, value } = await reader.read()
@@ -82,15 +83,42 @@ async function* openAIStreamToAnthropicStream(
         fullText += textContent
 
         // Loop detection: if the model is repeating the same pattern, abort
-        // Check every 2000 chars to avoid overhead
-        if (fullText.length > 4000 && fullText.length % 2000 < 50) {
-          const last1k = fullText.slice(-1000)
-          const prev1k = fullText.slice(-2000, -1000)
-          if (last1k === prev1k) {
-            // Model is stuck in a loop — truncate and stop
-            fullText = fullText.slice(0, fullText.length - 1000)
-            break
+        let loopDetected = false
+
+        // Strategy 1: window-based repetition detection (needs enough text)
+        if (fullText.length > 3000 && fullText.length % 500 < 50) {
+          for (const winSize of [500, 1000, 2000]) {
+            if (fullText.length >= winSize * 2) {
+              const lastWin = fullText.slice(-winSize)
+              const prevWin = fullText.slice(-winSize * 2, -winSize)
+              if (lastWin === prevWin) {
+                fullText = fullText.slice(0, fullText.length - winSize)
+                loopDetected = true
+                break
+              }
+            }
           }
+        }
+
+        // Strategy 2: count tool_call markers — works at any text length
+        // 7+ markers is almost certainly a loop (normal usage is 1-3)
+        if (!loopDetected && fullText.length % 200 < 50) {
+          const toolCallCount = (fullText.match(/<\|tool_call>/g) || []).length
+          if (toolCallCount > 6) {
+            // Keep text up to the 3rd marker
+            let idx = -1
+            for (let i = 0; i < 3; i++) {
+              idx = fullText.indexOf('<|tool_call>', idx + 1)
+              if (idx === -1) break
+            }
+            if (idx > 0) fullText = fullText.slice(0, idx)
+            loopDetected = true
+          }
+        }
+
+        if (loopDetected) {
+          loopWasDetected = true
+          break
         }
       }
 
@@ -111,6 +139,18 @@ async function* openAIStreamToAnthropicStream(
         }
       }
     }
+  }
+
+  // If a loop was detected, append a visible warning text block so the user knows
+  // and the model gets feedback to try a different approach on the next turn
+  if (loopWasDetected) {
+    const warningText = '\n\n[Loop detected: your output was repeating. The response was truncated. Try a different approach — do NOT retry the same tool call.]'
+    yield { type: 'content_block_start', index: translationState.blockIndex, content_block: { type: 'text', text: '' } }
+    yield { type: 'content_block_delta', index: translationState.blockIndex, delta: { type: 'text_delta', text: warningText } }
+    yield { type: 'content_block_stop', index: translationState.blockIndex }
+    translationState.blockIndex++
+    translationState.isFirstChunk = false
+    fullText += warningText
   }
 
   // After stream completes, check for tool calls in text (for tool-less models)
@@ -199,24 +239,36 @@ export function createOpenAICompatibleClient(config: OpenAIClientConfig) {
 
             // --- Capability enforcement: strip unsupported content ---
 
-            // Vision stripping: remove image blocks if model doesn't support vision
+            // Vision: convert image blocks to text placeholders if model doesn't support vision
             if (!capabilities.supportsVision) {
               for (const msg of openAIMessages) {
                 if (Array.isArray((msg as any).content)) {
-                  ;(msg as any).content = (msg as any).content.filter(
-                    (part: any) => part.type !== 'image_url' && part.type !== 'image',
-                  )
+                  ;(msg as any).content = (msg as any).content.map((part: any) => {
+                    if (part.type === 'image_url' || part.type === 'image') {
+                      return { type: 'text', text: '[An image was provided here but your model does not support vision. Ask the user to describe it or use a vision-capable model.]' }
+                    }
+                    return part
+                  })
                 }
               }
             }
 
-            // PDF stripping: remove document/file blocks if model doesn't support PDFs
+            // PDFs: convert document/file blocks to text placeholders if model doesn't support PDFs
             if (!capabilities.supportsPDFs) {
               for (const msg of openAIMessages) {
                 if (Array.isArray((msg as any).content)) {
-                  ;(msg as any).content = (msg as any).content.filter(
-                    (part: any) => part.type !== 'document' && part.type !== 'file',
-                  )
+                  ;(msg as any).content = (msg as any).content.map((part: any) => {
+                    if (part.type === 'document' || part.type === 'file') {
+                      // If the block has extractable text content, use it
+                      const name = part.name || part.filename || 'document'
+                      const textContent = part.text || part.content
+                      if (textContent && typeof textContent === 'string') {
+                        return { type: 'text', text: `[Content of ${name}]:\n${textContent}` }
+                      }
+                      return { type: 'text', text: `[A PDF/document "${name}" was provided here but your model does not support PDFs. Use a tool like Bash to extract its text, e.g.: pdftotext file.pdf -]` }
+                    }
+                    return part
+                  })
                 }
               }
             }

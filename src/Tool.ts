@@ -349,7 +349,9 @@ export function toolMatchesName(
   tool: { name: string; aliases?: string[] },
   name: string,
 ): boolean {
-  return tool.name === name || (tool.aliases?.includes(name) ?? false)
+  // Case-insensitive: local models often emit lowercase (e.g. Gemma: "bash" instead of "Bash")
+  const nameLower = name.toLowerCase()
+  return tool.name.toLowerCase() === nameLower || (tool.aliases?.some(a => a.toLowerCase() === nameLower) ?? false)
 }
 
 /**

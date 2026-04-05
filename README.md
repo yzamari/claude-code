@@ -74,7 +74,48 @@ For in-depth guides, see the [`docs/`](docs/) directory:
 | **[Subsystems Guide](docs/subsystems.md)** | Deep dives into Bridge, MCP, Permissions, Plugins, Skills, Tasks, Memory, Voice |
 | **[Exploration Guide](docs/exploration-guide.md)** | How to navigate the codebase — study paths, grep patterns, key files |
 
+| **[Multi-Model Setup](docs/multi-model-setup.md)** | Route tasks to Claude, Gemini, Ollama, MLX, or llama.cpp — smart routing, local models, uncensored mode |
+
 Also see: [CONTRIBUTING.md](CONTRIBUTING.md) · [MCP Server README](mcp-server/README.md)
+
+---
+
+## 🚀 Quick Start: Run It Yourself
+
+```bash
+# 1. Clone
+git clone https://github.com/yzamari/claude-code.git
+cd claude-code
+
+# 2. Install everything (runtime, Ollama, llama.cpp, API keys)
+chmod +x install.sh
+./install.sh
+
+# 3. Run with Claude (needs Anthropic API key)
+./run.sh claude
+
+# 4. Run with smart multi-model routing
+./run.sh smart
+
+# 5. Run with uncensored local model (no cloud, no filters)
+./run.sh heretic
+```
+
+### Available Models
+
+| Command | Model | Cloud/Local | Notes |
+|---------|-------|-------------|-------|
+| `./run.sh smart` | Multi-model routing | Both | Routes each task to the best model |
+| `./run.sh heretic` | gemma4-heretic | Local | Uncensored, llama.cpp Metal, 128K context |
+| `./run.sh heretic-mlx` | Qwen3.5-40B heretic | Local | Uncensored, MLX native, fastest |
+| `./run.sh claude` | Claude Opus 4.6 | Cloud | Best quality, needs API key |
+| `./run.sh gemini` | Gemini 3.1 Pro | Cloud | 2M context, needs API key |
+| `./run.sh sonnet` | Claude Sonnet 4.6 | Cloud | Fast + cheap |
+| `./run.sh ollama` | DeepSeek Coder v2 | Local | Via Ollama |
+
+`run.sh` auto-starts the required local server (llama-server, mlx_lm, or Ollama) — no manual setup needed.
+
+See [docs/multi-model-setup.md](docs/multi-model-setup.md) for full configuration guide.
 
 ---
 

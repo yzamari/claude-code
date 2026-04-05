@@ -301,7 +301,7 @@ ollama pull gemma4-heretic
 **Architecture:**
 - **Runtime:** llama.cpp server (not Ollama) — 2x faster, direct Metal GPU
 - **Thinking:** Disabled (`--reasoning-budget 0`) — 10x faster responses
-- **Context:** 16K tokens (enough for Claude Code's system prompt + tools + conversation)
+- **Context:** 128K tokens (long conversations, large codebases)
 - **Safety:** System prompt replaced with unrestricted minimal prompt for localhost models
 - **Tools:** All Claude Code tools available (file ops, bash, MCPs, DuckDuckGo search, Playwright browser)
 - **Cost:** Free, fully offline, no cloud API required

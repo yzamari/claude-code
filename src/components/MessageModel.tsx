@@ -15,7 +15,7 @@ type Props = {
  * Each model family gets a distinct color so users can visually
  * distinguish which model produced each response.
  */
-function getModelColor(model: string): string {
+export function getModelColor(model: string): string {
   const m = model.toLowerCase();
   // Anthropic models
   if (m.includes('opus')) return '#D4A0FF';

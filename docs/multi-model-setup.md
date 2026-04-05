@@ -263,7 +263,7 @@ mlx-tq-server --model mlx-community/Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4b
 
 ### gemma4-heretic (Uncensored Local Model)
 
-An uncensored Gemma 4 variant with no content restrictions. Runs locally via Ollama with Claude Code's safety layer automatically stripped for localhost models.
+An uncensored Gemma 4 variant with no content restrictions. Runs locally via llama.cpp with Metal GPU acceleration. Claude Code's safety layer is automatically stripped for localhost models.
 
 **Quick setup:**
 
@@ -272,41 +272,45 @@ chmod +x setup-heretic.sh
 ./setup-heretic.sh
 ```
 
-**Manual setup:**
-
-```bash
-# Install Ollama
-brew install ollama   # macOS
-ollama serve          # start server
-
-# Pull the model (~16 GB)
-ollama pull gemma4-heretic
-```
-
 **Run:**
 
 ```bash
 ./run.sh heretic
-# or
-./run.sh uncensored
 ```
 
-**Provider config:**
+`run.sh` automatically:
+1. Checks if llama-server is running on port 8324
+2. If not, starts it with Metal GPU, 16K context, thinking disabled
+3. Waits for the model to load (~30 seconds first time)
+4. Launches Claude Code with all tasks routed to the local model
 
-```json
-"ollama": {
-  "type": "openai-compatible",
-  "baseUrl": "http://localhost:11434/v1",
-  "models": ["gemma4-heretic"]
-}
+**Manual setup (if you prefer):**
+
+```bash
+# Install dependencies
+brew install ollama llama.cpp
+
+# Pull the model (~16 GB GGUF)
+ollama serve &
+ollama pull gemma4-heretic
+
+# run.sh handles the rest — just run:
+./run.sh heretic
 ```
 
-**What makes it different:**
-- Claude Code's safety instructions are automatically stripped for all localhost models
-- The model receives a minimal system prompt with no content restrictions
-- All Claude Code tools remain available (file ops, bash, MCPs)
-- DuckDuckGo web search and Playwright browser available via MCP
-- Fully offline, no cloud API required
+**Architecture:**
+- **Runtime:** llama.cpp server (not Ollama) — 2x faster, direct Metal GPU
+- **Thinking:** Disabled (`--reasoning-budget 0`) — 10x faster responses
+- **Context:** 16K tokens (enough for Claude Code's system prompt + tools + conversation)
+- **Safety:** System prompt replaced with unrestricted minimal prompt for localhost models
+- **Tools:** All Claude Code tools available (file ops, bash, MCPs, DuckDuckGo search, Playwright browser)
+- **Cost:** Free, fully offline, no cloud API required
+
+**Also available (slower, MLX, downloading):**
+
+```bash
+./run.sh heretic-mlx   # Qwen3.5-40B Opus-distilled heretic via MLX
+```
 
 ---
 

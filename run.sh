@@ -2,12 +2,18 @@
 # Claude Code Multi-Model Router
 # Usage:
 #   ./run.sh                  # Smart routing (Gemini + Claude + Local)
-#   ./run.sh gemini           # Force Gemini 3.1 Pro only
+#   ./run.sh heretic          # Uncensored local (llama.cpp Metal, fast)
+#   ./run.sh heretic-mlx      # Uncensored local (MLX TurboQuant, fastest)
 #   ./run.sh claude           # Force Claude Opus only
-#   ./run.sh ollama           # Force local Ollama only
+#   ./run.sh gemini           # Force Gemini 3.1 Pro only
 #   ./run.sh -p "prompt"      # Print mode (non-interactive)
 
 MODEL_ALIAS="${1:-smart}"
+
+GGUF_PATH="$HOME/.ollama/models/blobs/sha256-92a767fc165395c69291768a53526dace172d23a44daef4cdd0f7a6175b7489b"
+LLAMA_PORT=8324
+TQ_PORT=8323
+OLLAMA_PORT=11434
 
 case "$MODEL_ALIAS" in
   gemini|gemini-3.1)      MODEL="gemini/gemini-3.1-pro-preview" ;;
@@ -28,6 +34,80 @@ case "$MODEL_ALIAS" in
   -p)                     MODEL="gemini/gemini-3.1-pro-preview"; shift; PROMPT="$*" ;;
   *)                      MODEL="$MODEL_ALIAS" ;;
 esac
+
+# ── Auto-start local servers when needed ──────────────────────────────
+
+ensure_ollama() {
+  if ! curl -s http://localhost:$OLLAMA_PORT/api/tags &>/dev/null; then
+    echo "→ Starting Ollama server..."
+    ollama serve &>/dev/null &
+    sleep 3
+  fi
+}
+
+ensure_llama_server() {
+  if ! curl -s http://localhost:$LLAMA_PORT/health &>/dev/null; then
+    if [ ! -f "$GGUF_PATH" ]; then
+      echo "✗ GGUF model not found at $GGUF_PATH"
+      echo "  Run: ollama pull gemma4-heretic"
+      exit 1
+    fi
+    echo "→ Starting llama-server on port $LLAMA_PORT (Metal, no-thinking)..."
+    llama-server \
+      --model "$GGUF_PATH" \
+      --port $LLAMA_PORT \
+      --n-gpu-layers 999 \
+      --ctx-size 16384 \
+      --threads 8 \
+      --parallel 1 \
+      --reasoning-budget 0 \
+      2>/tmp/llama-server.log &
+    # Wait for server to load model
+    echo -n "  Loading model"
+    for i in $(seq 1 60); do
+      if curl -s http://localhost:$LLAMA_PORT/health &>/dev/null; then
+        echo " ready!"
+        return 0
+      fi
+      echo -n "."
+      sleep 2
+    done
+    echo " timeout. Check /tmp/llama-server.log"
+    exit 1
+  fi
+}
+
+ensure_tq_server() {
+  if ! curl -s http://localhost:$TQ_PORT/v1/models &>/dev/null; then
+    local TQ_MODEL="$1"
+    echo "→ Starting mlx-lm server on port $TQ_PORT..."
+    mlx_lm.server --model "$TQ_MODEL" --port $TQ_PORT 2>/tmp/tq-server.log &
+    echo -n "  Loading model"
+    for i in $(seq 1 120); do
+      if curl -s http://localhost:$TQ_PORT/v1/models &>/dev/null; then
+        echo " ready!"
+        return 0
+      fi
+      echo -n "."
+      sleep 2
+    done
+    echo " timeout. Check /tmp/tq-server.log"
+    exit 1
+  fi
+}
+
+# Start the right server based on provider
+PROVIDER_NAME="${MODEL%%/*}"
+case "$PROVIDER_NAME" in
+  ollama)  ensure_ollama ;;
+  llama)   ensure_llama_server ;;
+  tq)
+    TQ_MODEL="${MODEL#tq/}"
+    ensure_tq_server "$TQ_MODEL"
+    ;;
+esac
+
+# ── Build router settings ─────────────────────────────────────────────
 
 # Smart routing: each task type goes to the best model for it
 #
@@ -50,8 +130,6 @@ SMART_SETTINGS='{"modelRouter":{"enabled":true,"default":"gemini/gemini-3.1-pro-
 if [ "$MODEL_ALIAS" = "smart" ] || [ "$MODEL_ALIAS" = "-p" ]; then
   SETTINGS="$SMART_SETTINGS"
 else
-  # Determine provider name and model for the chosen model
-  PROVIDER_NAME="${MODEL%%/*}"
   MODEL_ID="${MODEL#*/}"
   if [ "$PROVIDER_NAME" = "$MODEL" ]; then
     # No slash — native Anthropic model (e.g. claude-opus-4-6)
@@ -59,15 +137,17 @@ else
   else
     # External provider — route everything to this one model
     case "$PROVIDER_NAME" in
-      ollama)  BASE_URL="http://localhost:11434/v1" ;;
-      tq)      BASE_URL="http://localhost:8323/v1" ;;
-      llama)   BASE_URL="http://localhost:8324/v1" ;;
+      ollama)  BASE_URL="http://localhost:$OLLAMA_PORT/v1" ;;
+      tq)      BASE_URL="http://localhost:$TQ_PORT/v1" ;;
+      llama)   BASE_URL="http://localhost:$LLAMA_PORT/v1" ;;
       gemini)  BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai" ;;
-      *)       BASE_URL="http://localhost:11434/v1" ;;
+      *)       BASE_URL="http://localhost:$OLLAMA_PORT/v1" ;;
     esac
     SETTINGS="{\"modelRouter\":{\"enabled\":true,\"default\":\"$MODEL\",\"providers\":{\"$PROVIDER_NAME\":{\"type\":\"openai-compatible\",\"baseUrl\":\"$BASE_URL\",\"models\":[\"$MODEL_ID\"]}},\"routes\":[{\"tasks\":[\"file_search\",\"grep\",\"glob\",\"file_read\",\"simple_edit\",\"test_execution\",\"large_context\",\"subagent\",\"complex_reasoning\",\"planning\"],\"model\":\"$MODEL\"}],\"fallbackChain\":[]}}"
   fi
 fi
+
+# ── Launch Claude Code ────────────────────────────────────────────────
 
 export CLAUDE_CODE_SKIP_VERSION_CHECK=1
 export ANTHROPIC_MODEL="$MODEL"
@@ -77,8 +157,9 @@ if [ -n "$PROMPT" ]; then
 else
   echo "╭──────────────────────────────────────────────────╮"
   echo "│  Claude Code Multi-Model Router                  │"
-  echo "│  Default: $MODEL"
+  echo "│  Model: $MODEL"
   echo "│                                                  │"
+  if [ "$MODEL_ALIAS" = "smart" ]; then
   echo "│  Smart routing:                                  │"
   echo "│    complex reasoning → Claude Opus (best)        │"
   echo "│    planning          → Claude Opus               │"
@@ -88,9 +169,13 @@ else
   echo "│    file search/grep  → MLX TurboQuant (local)    │"
   echo "│    simple edits      → MLX TurboQuant (local)    │"
   echo "│    file reads        → MLX TurboQuant (local)    │"
+  else
+  echo "│  All tasks → $MODEL"
+  fi
   echo "│                                                  │"
+  echo "│  Aliases: heretic, heretic-mlx, claude, gemini,  │"
+  echo "│           smart, sonnet, haiku, ollama, tq       │"
   echo "│  /model to switch manually                       │"
-  echo "│  --debug 2>router.log to see routing decisions   │"
   echo "╰──────────────────────────────────────────────────╯"
   echo ""
   exec bun dist/cli.mjs --dangerously-skip-permissions --settings "$SETTINGS"

@@ -62,7 +62,9 @@ export function translateOpenAIChunkToAnthropicEvents(
   const { delta, finish_reason } = choice
 
   // Text content — some models (e.g. gemma4-heretic) put output in "reasoning" instead of "content"
-  const textContent = delta.content ?? (delta as any).reasoning ?? null
+  const textContent = (delta.content != null && delta.content !== '' ? delta.content : null)
+    ?? (delta as any).reasoning
+    ?? null
   if (textContent != null && textContent !== '') {
     if (state.isFirstChunk) {
       events.push({

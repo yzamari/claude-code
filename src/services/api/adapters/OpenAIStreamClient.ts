@@ -74,7 +74,9 @@ async function* openAIStreamToAnthropicStream(
       // Accumulate full text for tool call parsing
       // Some models (e.g. gemma4-heretic) put output in "reasoning" instead of "content"
       const delta = chunk.choices[0]?.delta
-      const textContent = delta?.content ?? (delta as any)?.reasoning
+      const rawContent = delta?.content
+      const textContent = (rawContent != null && rawContent !== '' ? rawContent : null)
+        ?? (delta as any)?.reasoning
       if (textContent) {
         fullText += textContent
       }

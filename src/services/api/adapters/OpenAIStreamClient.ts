@@ -116,6 +116,17 @@ async function* openAIStreamToAnthropicStream(
           }
         }
 
+        // Strategy 3: model special token flood (Gemma thinking loop, Llama/Qwen
+        // chat template leaks, etc.) — if >15 special tokens appear, the model
+        // is stuck outputting control tokens instead of real content
+        if (!loopDetected && fullText.length % 200 < 50) {
+          const specialCount = (fullText.match(/<\|[\w]+>|<\/?\w+\|>|<\|[^>]*\|>|\[\/?INST\]/g) || []).length
+          if (specialCount > 15) {
+            fullText = ''
+            loopDetected = true
+          }
+        }
+
         if (loopDetected) {
           loopWasDetected = true
           break

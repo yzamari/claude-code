@@ -44,6 +44,25 @@ export interface AnthropicStreamEvent {
   [key: string]: unknown
 }
 
+/**
+ * Strips model-family special tokens from streamed text for display.
+ * Handles control tokens from Gemma, Llama, Qwen, Mistral, DeepSeek, Phi, etc.
+ * that leak through when using local models via llama.cpp/Ollama.
+ */
+function stripModelSpecialTokens(text: string): string {
+  return text
+    // <|...|> tokens (Llama, Qwen, DeepSeek, Gemma): <|begin_of_text|>, <|im_start|>, <|"|>, etc.
+    .replace(/<\|[^>]*\|>/g, '')
+    // <|word> tokens (Gemma, Phi): <|channel>, <|tool_call>, <|user>, <|assistant>, etc.
+    .replace(/<\|[\w]+>/g, '')
+    // <word|> and </word|> tokens (Gemma): <channel|>, </tool_call|>, etc.
+    .replace(/<\/?\w[\w]*\|>/g, '')
+    // [INST] and [/INST] tokens (Mistral)
+    .replace(/\[\/?INST\]/g, '')
+}
+
+export { stripModelSpecialTokens }
+
 const FINISH_REASON_MAP: Record<string, string> = {
   stop: 'end_turn',
   length: 'max_tokens',
@@ -70,7 +89,11 @@ export function translateOpenAIChunkToAnthropicEvents(
     ?? (delta as any).reasoning_content
     ?? (delta as any).reasoning
     ?? null
-  if (textContent != null && textContent !== '') {
+  // Strip model special tokens before display (keeps raw text for tool parsing upstream)
+  const displayText = textContent != null && textContent !== ''
+    ? stripModelSpecialTokens(textContent)
+    : null
+  if (displayText != null && displayText !== '') {
     if (state.isFirstChunk) {
       events.push({
         type: 'content_block_start',
@@ -81,7 +104,7 @@ export function translateOpenAIChunkToAnthropicEvents(
     events.push({
       type: 'content_block_delta',
       index: state.blockIndex,
-      delta: { type: 'text_delta', text: textContent },
+      delta: { type: 'text_delta', text: displayText },
     })
   }
 

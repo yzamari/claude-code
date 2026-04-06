@@ -173,11 +173,71 @@ function extractBalancedJSON(text: string, startIdx: number): string | null {
 }
 
 /**
+ * Parses Gemma-style key:value argument strings into an object.
+ * Handles multiple formats: command shortcuts, quoted pairs, unquoted colon-value pairs.
+ * Shared by Format 3 (with special tokens) and Format 4 (bare call:Name{}).
+ */
+function parseGemmaArgs(rawArgsStr: string): Record<string, unknown> {
+  // Clean Gemma special tokens and strip args:{} wrapper
+  let argsStr = rawArgsStr
+    .replace(/<\|"\|>/g, '')
+    .replace(/<\|[^>]+\|>/g, '')
+    .replace(/^\s*args:\{/, '')
+    .replace(/\}\s*$/, '')
+
+  // Try command shortcut first (most common for Bash calls)
+  // Skip when other key:value pairs follow a comma — the segment parser handles multi-key strings
+  const hasMultipleKeys = /,\s*\w+\s*:/.test(argsStr)
+  if (!hasMultipleKeys) {
+    const cmdMatch = argsStr.match(/^command\s*:\s*"?(.+?)"?\s*$/)
+    if (cmdMatch) {
+      return { command: cmdMatch[1].trim() }
+    }
+  }
+
+  // Try to parse as key:"value" or key:'value' pairs (handles multi-arg calls like Agent)
+  const pairs: Record<string, string> = {}
+  const pairRegex = /(\w+)\s*:\s*"((?:[^"\\]|\\.)*)"|(\w+)\s*:\s*'((?:[^'\\]|\\.)*)'/g
+  let pairMatch
+  while ((pairMatch = pairRegex.exec(argsStr)) !== null) {
+    const key = pairMatch[1] || pairMatch[3]
+    const val = pairMatch[2] || pairMatch[4]
+    pairs[key] = val
+  }
+  if (Object.keys(pairs).length > 0) {
+    return pairs
+  }
+
+  // Fallback: split on comma-then-key boundaries to handle colons in values
+  // e.g. "query:select:AskUserQuestion,max_results:1" splits correctly
+  const segments = argsStr.split(/,\s*(?=\w+\s*:)/)
+  const segPairs: Record<string, unknown> = {}
+  for (const seg of segments) {
+    const colonIdx = seg.indexOf(':')
+    if (colonIdx === -1) continue
+    const key = seg.slice(0, colonIdx).trim()
+    if (!key || /\s/.test(key)) continue
+    let val = seg.slice(colonIdx + 1).trim()
+    val = val.replace(/^["']|["']$/g, '')
+    if (val === 'true') segPairs[key] = true
+    else if (val === 'false') segPairs[key] = false
+    else if (/^\d+(\.\d+)?$/.test(val) && val !== '') segPairs[key] = Number(val)
+    else segPairs[key] = val
+  }
+  if (Object.keys(segPairs).length > 0) {
+    return segPairs
+  }
+
+  return { raw: argsStr }
+}
+
+/**
  * Parses tool call attempts from model text output.
  * Supports multiple formats:
  *   1. ```tool_call\n{"tool":"X","arguments":{...}}\n```
  *   2. {"tool":"X","arguments":{...}}  (bare JSON in text, brace-balanced)
- *   3. <|tool_call>call:ToolName{args:{...}}<tool_call|>  (Gemma native)
+ *   3. <|tool_call>call:ToolName{args:{...}}<tool_call|>  (Gemma native with special tokens)
+ *   4. call:ToolName{key:val,...}  (bare Gemma format without special tokens)
  *
  * Also deduplicates repeated identical calls (loop detection).
  */
@@ -239,52 +299,38 @@ export function parseToolCallsFromText(text: string): ParsedToolCall[] {
       if (endIdx === -1) continue
 
       // Extract everything between the opening { and the closing tag, then strip trailing }
-      let argsStr = text.slice(argsStart, endIdx).replace(/\}\s*$/, '').replace(/^\s*args:\{/, '')
-      // Clean Gemma special tokens
-      argsStr = argsStr.replace(/<\|"\|>/g, '').replace(/<\|[^>]+\|>/g, '')
+      const argsStr = text.slice(argsStart, endIdx).replace(/\}\s*$/, '')
+      addCall(toolName, parseGemmaArgs(argsStr))
+    } catch { /* skip malformed */ }
+  }
 
-      // Try command shortcut first (most common for Bash calls)
-      const cmdMatch = argsStr.match(/^command\s*:\s*"?(.+?)"?\s*$/)
-      if (cmdMatch) {
-        addCall(toolName, { command: cmdMatch[1].trim() })
-      } else {
-        // Try to parse as key:"value" pairs (handles multi-arg calls like Agent)
-        const pairs: Record<string, string> = {}
-        // Match key: "value" or key: 'value' patterns, allowing multiline values
-        const pairRegex = /(\w+)\s*:\s*"((?:[^"\\]|\\.)*)"|(\w+)\s*:\s*'((?:[^'\\]|\\.)*)'/g
-        let pairMatch
-        while ((pairMatch = pairRegex.exec(argsStr)) !== null) {
-          const key = pairMatch[1] || pairMatch[3]
-          const val = pairMatch[2] || pairMatch[4]
-          pairs[key] = val
-        }
+  // Format 4: bare call:ToolName{key:val,...} without <|tool_call> wrappers.
+  // Common when Gemma/Llama drops special tokens. Uses brace counting to find the end.
+  // Multiple calls can appear back-to-back: call:Bash{...}call:Skill{...}
+  const bareCallRegex = /(?:^|[}\s\n])call:(\w+)\{/g
+  while ((match = bareCallRegex.exec(text)) !== null) {
+    // Skip if this position was already matched by Format 3 (has <|tool_call> before it)
+    const prefixStart = Math.max(0, match.index - 15)
+    if (text.slice(prefixStart, match.index + 1).includes('<|tool_call>')) continue
 
-        if (Object.keys(pairs).length > 0) {
-          addCall(toolName, pairs)
-        } else {
-          // Fallback: split on comma-then-key boundaries to handle colons in values
-          // e.g. "query:select:AskUserQuestion,max_results:1" splits correctly
-          const segments = argsStr.split(/,\s*(?=\w+\s*:)/)
-          const segPairs: Record<string, unknown> = {}
-          for (const seg of segments) {
-            const colonIdx = seg.indexOf(':')
-            if (colonIdx === -1) continue
-            const key = seg.slice(0, colonIdx).trim()
-            if (!key || /\s/.test(key)) continue
-            let val = seg.slice(colonIdx + 1).trim()
-            val = val.replace(/^["']|["']$/g, '')
-            if (val === 'true') segPairs[key] = true
-            else if (val === 'false') segPairs[key] = false
-            else if (/^\d+(\.\d+)?$/.test(val) && val !== '') segPairs[key] = Number(val)
-            else segPairs[key] = val
-          }
-          if (Object.keys(segPairs).length > 0) {
-            addCall(toolName, segPairs)
-          } else {
-            addCall(toolName, { raw: argsStr })
-          }
+    try {
+      const toolName = match[1]
+      // Find the opening { — it's the last char of the match
+      const braceStart = match.index + match[0].length - 1
+      // Find matching closing } using depth counting
+      let depth = 1
+      let endIdx = -1
+      for (let i = braceStart + 1; i < text.length && depth > 0; i++) {
+        if (text[i] === '{') depth++
+        else if (text[i] === '}') {
+          depth--
+          if (depth === 0) { endIdx = i; break }
         }
       }
+      if (endIdx === -1) continue
+
+      const argsStr = text.slice(braceStart + 1, endIdx)
+      addCall(toolName, parseGemmaArgs(argsStr))
     } catch { /* skip malformed */ }
   }
 

@@ -229,4 +229,54 @@ describe('parseToolCallsFromText', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0].input).toEqual({ enabled: true, count: 42, name: 'hello' })
   })
+
+  it('parses bare call:Name{} format without special tokens', () => {
+    const text = 'call:Bash{command:ls -F,description:List files in the current directory}'
+    const calls = parseToolCallsFromText(text)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].name).toBe('Bash')
+    expect(calls[0].input.command).toBe('ls -F')
+    expect(calls[0].input.description).toBe('List files in the current directory')
+  })
+
+  it('separates command from description in Bash calls (regression: URL corruption)', () => {
+    const text = 'call:Bash{command:git clone https://github.com/fastapi/fastapi.git,description:Clone the FastAPI repository.}'
+    const calls = parseToolCallsFromText(text)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].name).toBe('Bash')
+    expect(calls[0].input.command).toBe('git clone https://github.com/fastapi/fastapi.git')
+    expect(calls[0].input.description).toBe('Clone the FastAPI repository.')
+  })
+
+  it('parses multiple back-to-back bare call: formats', () => {
+    const text = 'call:Bash{command:ls -F,description:List files}call:Skill{skill:superpowers:brainstorm}thought'
+    const calls = parseToolCallsFromText(text)
+    expect(calls).toHaveLength(2)
+    expect(calls[0].name).toBe('Bash')
+    expect(calls[1].name).toBe('Skill')
+    expect(calls[1].input).toHaveProperty('skill')
+  })
+
+  it('parses bare call: format with quoted values', () => {
+    const text = 'call:Agent{prompt: "Search the codebase for bugs", description: "Find bugs"}'
+    const calls = parseToolCallsFromText(text)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].name).toBe('Agent')
+    expect(calls[0].input).toEqual({ prompt: 'Search the codebase for bugs', description: 'Find bugs' })
+  })
+
+  it('does not double-parse call: that was already matched by Gemma Format 3', () => {
+    const text = '<|tool_call>call:Bash{command: "ls"}<tool_call|>'
+    const calls = parseToolCallsFromText(text)
+    expect(calls).toHaveLength(1) // not 2
+    expect(calls[0].name).toBe('Bash')
+  })
+
+  it('parses bare call: after newline', () => {
+    const text = 'Some explanation text\ncall:Read{file_path:/tmp/test.txt}'
+    const calls = parseToolCallsFromText(text)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].name).toBe('Read')
+    expect(calls[0].input).toHaveProperty('file_path')
+  })
 })

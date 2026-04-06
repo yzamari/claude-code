@@ -77,15 +77,30 @@ export function injectToolsIntoSystemPrompt(
     })
     .join('\n\n')
 
-  // Add a concrete Agent example when the Agent tool is available
+  // Add concrete Agent examples when the Agent tool is available
   const hasAgentTool = tools.some(t => t.function.name === 'Agent')
   const agentExample = hasAgentTool
     ? [
         '',
-        'Example — spawning an agent to do work:',
+        'Example — spawning one agent:',
         '```tool_call',
         '{"tool": "Agent", "arguments": {"prompt": "Search the codebase for all usages of the deprecated API and list them", "description": "Find deprecated API usages"}}',
         '```',
+        '',
+        'Example — spawning MULTIPLE agents in PARALLEL with different models:',
+        '(output multiple tool_call blocks in ONE response — they run simultaneously)',
+        '```tool_call',
+        '{"tool": "Agent", "arguments": {"prompt": "Research the architecture and write a design doc", "description": "Architecture research", "model": "opus"}}',
+        '```',
+        '```tool_call',
+        '{"tool": "Agent", "arguments": {"prompt": "Search for all TODO comments and list them", "description": "Find TODOs", "model": "llama/gemma4-heretic"}}',
+        '```',
+        '```tool_call',
+        '{"tool": "Agent", "arguments": {"prompt": "Run the test suite and report failures", "description": "Run tests", "model": "sonnet"}}',
+        '```',
+        '',
+        'Available model aliases for the "model" parameter: "opus", "sonnet", "haiku", "llama/gemma4-heretic", "gemini/gemini-3.1-pro-preview".',
+        'If omitted, the agent inherits the current model.',
       ].join('\n')
     : ''
 

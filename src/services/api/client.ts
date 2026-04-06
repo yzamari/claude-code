@@ -141,17 +141,43 @@ export async function getAnthropicClient({
       const routerConfig = (settings as any).modelRouter
       const providerConfig = routerConfig?.providers?.[parsed.provider]
 
-      if (providerConfig) {
+      // Well-known local providers: auto-configure when no explicit modelRouter
+      // config exists. This prevents silent fallthrough to Anthropic's API when
+      // the user sets /model ollama/... or tq/... without a modelRouter block.
+      const wellKnownDefaults: Record<string, { baseUrl: string }> = {
+        ollama: { baseUrl: 'http://localhost:11434/v1' },
+        tq: { baseUrl: 'http://localhost:8323/v1' },
+        llama: { baseUrl: 'http://localhost:8324/v1' },
+        lmstudio: { baseUrl: 'http://localhost:1234/v1' },
+        llamacpp: { baseUrl: 'http://localhost:8080/v1' },
+        vllm: { baseUrl: 'http://localhost:8000/v1' },
+        localai: { baseUrl: 'http://localhost:8080/v1' },
+        openai: { baseUrl: 'https://api.openai.com/v1' },
+        gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai' },
+      }
+
+      const resolvedConfig = providerConfig ?? wellKnownDefaults[parsed.provider]
+
+      if (resolvedConfig) {
         // Strip Anthropic-specific headers for external providers
         const { Authorization, ...externalHeaders } = defaultHeaders as Record<string, string>
         const client = createOpenAICompatibleClient({
-          baseUrl: providerConfig.baseUrl ?? 'https://api.openai.com/v1',
-          apiKey: providerConfig.apiKey ?? process.env[`${parsed.provider.toUpperCase()}_API_KEY`],
+          baseUrl: resolvedConfig.baseUrl ?? 'https://api.openai.com/v1',
+          apiKey: resolvedConfig.apiKey ?? process.env[`${parsed.provider.toUpperCase()}_API_KEY`],
           model: parsed.model,
           defaultHeaders: externalHeaders,
         })
         return client as unknown as Anthropic
       }
+
+      // Unknown external provider with no config — do NOT silently fall through
+      // to the Anthropic API, which would send "provider/model" as the model
+      // string and produce misleading results.
+      throw new Error(
+        `Unknown external provider "${parsed.provider}". ` +
+          `Either configure it in settings.json under modelRouter.providers.${parsed.provider}, ` +
+          `or use a well-known provider (${Object.keys(wellKnownDefaults).join(', ')}).`,
+      )
     }
   }
 

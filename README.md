@@ -132,6 +132,21 @@ Every assistant response shows a **colored model label** so you always know whic
 
 When multiple agents run in parallel with different models, each agent's output is clearly labeled with its model and color.
 
+### Multi-Model Parallel Agents
+
+Any model can orchestrate agents running on different models. Up to 10 parallel tool calls per response:
+
+```
+./run.sh heretic
+> Run 3 agents: Agent 1 use sonnet, Agent 2 use haiku, Agent 3 use opus. Each say hello.
+```
+
+Heretic (local Gemma) dispatches sonnet, haiku, and opus agents in parallel — each shows its own colored label.
+
+### Local Model Token Stripping
+
+Local models (Gemma, Llama, Qwen, Mistral, DeepSeek, Phi) sometimes leak internal control tokens (`<|channel>`, `<|im_start|>`, `[INST]`, etc.) through llama.cpp/Ollama. These are automatically stripped from display while preserved for tool call parsing. Multi-layer loop detection catches thinking loops instantly.
+
 See [docs/multi-model-setup.md](docs/multi-model-setup.md) for full configuration guide.
 
 ---

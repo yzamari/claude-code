@@ -29,10 +29,14 @@ function summarizeParams(params: Record<string, unknown>, depth = 0): string {
   const indent = '  '.repeat(depth + 1)
   return entries
     .map(([name, schema]) => {
-      const type = schema.type ?? 'any'
+      // Show enum values inline so models know valid options (e.g. "worktree" | "remote")
+      const enumVals = schema.enum as string[] | undefined
+      const type = enumVals && enumVals.length > 0
+        ? enumVals.slice(0, 6).map(v => `"${v}"`).join(' | ')
+        : (schema.type ?? 'any')
       const req = required.has(name) ? ', required' : ''
       const desc = schema.description
-        ? ` — ${(schema.description as string).slice(0, 80)}`
+        ? ` — ${(schema.description as string).slice(0, 150)}`
         : ''
       let line = `${indent}- ${name} (${type}${req})${desc}`
 
@@ -64,13 +68,26 @@ export function injectToolsIntoSystemPrompt(
   const toolDescriptions = tools
     .map((t) => {
       const params = summarizeParams(t.function.parameters)
-      // Truncate long descriptions to keep prompt manageable
-      const desc = t.function.description.length > 200
-        ? t.function.description.slice(0, 200) + '...'
+      // Truncate long descriptions — 500 chars captures critical usage info
+      // for complex tools like Agent while staying within context budget
+      const desc = t.function.description.length > 500
+        ? t.function.description.slice(0, 500) + '...'
         : t.function.description
       return `### ${t.function.name}\n${desc}\nParameters:\n${params}`
     })
     .join('\n\n')
+
+  // Add a concrete Agent example when the Agent tool is available
+  const hasAgentTool = tools.some(t => t.function.name === 'Agent')
+  const agentExample = hasAgentTool
+    ? [
+        '',
+        'Example — spawning an agent to do work:',
+        '```tool_call',
+        '{"tool": "Agent", "arguments": {"prompt": "Search the codebase for all usages of the deprecated API and list them", "description": "Find deprecated API usages"}}',
+        '```',
+      ].join('\n')
+    : ''
 
   const injection = [
     '\n\n---',
@@ -79,6 +96,7 @@ export function injectToolsIntoSystemPrompt(
     '```tool_call',
     '{"tool": "tool_name", "arguments": {"param1": "value1", "param2": "value2"}}',
     '```',
+    agentExample,
     '',
     'RULES:',
     '- Use valid JSON with double quotes for all keys and string values.',
@@ -86,6 +104,8 @@ export function injectToolsIntoSystemPrompt(
     '- Do NOT hallucinate or roleplay tool results. Wait for the actual result.',
     '- If a tool call fails, try a different approach. Do NOT retry the same call.',
     '- Maximum 10 tool calls per response.',
+    '- Do NOT describe or narrate tool calls. Output the JSON block directly — never write "I will use X tool" without the actual ```tool_call block.',
+    '- To call a tool, you MUST output the ```tool_call block. Writing about a tool in plain text does NOT execute it.',
     '',
     `Available tools (${tools.length}):\n`,
     toolDescriptions,
@@ -255,4 +275,38 @@ export function parseToolCallsFromText(text: string): ParsedToolCall[] {
 
   // Limit to first 10 unique tool calls to prevent runaway execution
   return calls.slice(0, 10)
+}
+
+/**
+ * Detects when a model narrates about using tools instead of producing
+ * structured tool_call blocks. Returns the first narrated tool name,
+ * or null if no narration detected.
+ *
+ * Only useful when parseToolCallsFromText() returned 0 calls — if the
+ * model narrated AND produced a valid call, the call already works.
+ */
+export function detectNarratedToolCalls(text: string, toolNames: string[]): string | null {
+  if (toolNames.length === 0) return null
+
+  // Build a pattern that matches common narration phrases with known tool names
+  // "I will use the Agent tool", "I'll launch an agent", "Let me call Bash",
+  // "I'm going to invoke Read", "Using the Grep tool to..."
+  const namePattern = toolNames.join('|')
+  const patterns = [
+    new RegExp(`I(?:'ll| will| am going to| shall)\\s+(?:use|launch|call|invoke|run|execute|start|spawn)\\s+(?:the\\s+)?(?:${namePattern})\\b`, 'i'),
+    new RegExp(`(?:Let me|I'm going to|I need to)\\s+(?:use|launch|call|invoke|run|start|spawn)\\s+(?:the\\s+)?(?:${namePattern})\\b`, 'i'),
+    new RegExp(`(?:Using|Launching|Calling|Invoking|Running|Spawning)\\s+(?:the\\s+)?(?:${namePattern})\\s+(?:tool|agent)`, 'i'),
+  ]
+
+  for (const pattern of patterns) {
+    const match = pattern.exec(text)
+    if (match) {
+      // Extract which tool name was mentioned
+      const nameRegex = new RegExp(`\\b(${namePattern})\\b`, 'i')
+      const nameMatch = nameRegex.exec(match[0])
+      return nameMatch ? nameMatch[1] : toolNames[0]
+    }
+  }
+
+  return null
 }

@@ -20,6 +20,7 @@ import {
 } from './StreamTranslator.js'
 import { getModelCapabilities } from '../../router/capabilities.js'
 import { OpenAICompatibleAPIError } from './errors.js'
+import { detectNarratedToolCalls } from './toolPromptInjection.js'
 
 export interface OpenAIClientConfig {
   baseUrl: string
@@ -35,6 +36,7 @@ export interface OpenAIClientConfig {
 async function* openAIStreamToAnthropicStream(
   response: Response,
   model: string,
+  toolNames?: string[],
 ): AsyncGenerator<unknown> {
   const messageId = `msg_${randomUUID().replace(/-/g, '').slice(0, 24)}`
 
@@ -187,6 +189,20 @@ async function* openAIStreamToAnthropicStream(
     }
   }
 
+  // Narration detection: if the model talked about using a tool but didn't
+  // produce a tool_call block, inject corrective feedback so it can self-correct
+  if (parsedCalls.length === 0 && toolNames && toolNames.length > 0 && fullText.length > 20) {
+    const narratedTool = detectNarratedToolCalls(fullText, toolNames)
+    if (narratedTool) {
+      const correction = `\n\n[You described using the ${narratedTool} tool but didn't include a tool_call block. To actually call it, output:\n\`\`\`tool_call\n{"tool": "${narratedTool}", "arguments": {"prompt": "your task here", "description": "short description"}}\n\`\`\`\nOnly the JSON block above triggers tool execution — text descriptions do NOT call tools.]`
+      yield { type: 'content_block_start', index: translationState.blockIndex, content_block: { type: 'text', text: '' } }
+      yield { type: 'content_block_delta', index: translationState.blockIndex, delta: { type: 'text_delta', text: correction } }
+      yield { type: 'content_block_stop', index: translationState.blockIndex }
+      translationState.blockIndex++
+      translationState.isFirstChunk = false
+    }
+  }
+
   // Empty response detection: if the model returned no content at all (no text,
   // no tool calls), the UI would render a blank message. Throw so the fallback
   // executor can try the next model in the chain instead of silently swallowing it.
@@ -319,6 +335,20 @@ export function createOpenAICompatibleClient(config: OpenAIClientConfig) {
               max_tokens: maxTokens,
             }
 
+            // DRY (Don't Repeat Yourself) sampling for local models.
+            // Penalizes repeated token sequences exponentially, preventing
+            // loops at the sampler level before they form — far more effective
+            // than post-hoc truncation. Settings tuned for code generation.
+            if (isLocalModel) {
+              body.dry_multiplier = 0.8        // enable DRY, scale penalty
+              body.dry_base = 1.75             // exponential escalation rate
+              body.dry_allowed_length = 3      // tolerate short repeated patterns (const x =, etc.)
+              body.dry_penalty_last_n = -1     // scan full context
+              body.dry_sequence_breakers = ['\n', ':', '"', '*', ';', '{', '}']  // code-aware breakers
+              // Sampler ordering: DRY after temperature (Daniel Han's fix for quantized models)
+              body.samplers = ['top_k', 'top_p', 'min_p', 'temperature', 'dry', 'typ_p', 'xtc']
+            }
+
             if (openAITools && openAITools.length > 0) {
               body.tools = openAITools
             }
@@ -359,7 +389,9 @@ export function createOpenAICompatibleClient(config: OpenAIClientConfig) {
               )
             }
 
-            const stream = openAIStreamToAnthropicStream(response, config.model)
+            // Pass tool names so stream can detect narrated (not actually called) tools
+            const allToolNames = tools?.map(t => t.name) ?? []
+            const stream = openAIStreamToAnthropicStream(response, config.model, allToolNames)
             const streamObj = Object.assign(stream, {
               controller: new AbortController(),
             })

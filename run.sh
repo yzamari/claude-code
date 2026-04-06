@@ -73,6 +73,7 @@ ensure_llama_server() {
       --threads 8 \
       --parallel 1 \
       --reasoning-budget 0 \
+      --samplers "top_k;top_p;min_p;temperature;dry;typ_p;xtc" \
       2>/tmp/llama-server.log &
     # Wait for server to load model
     echo -n "  Loading model"

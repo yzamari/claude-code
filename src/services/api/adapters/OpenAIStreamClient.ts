@@ -55,6 +55,7 @@ async function* openAIStreamToAnthropicStream(
   let specialTokenCount = 0
 
   while (true) {
+    if (loopWasDetected) break
     const { done, value } = await reader.read()
     if (done) break
 
@@ -104,10 +105,10 @@ async function* openAIStreamToAnthropicStream(
         }
 
         // Strategy 2: count tool_call markers — works at any text length
-        // 7+ markers is almost certainly a loop (normal usage is 1-3)
+        // 4+ markers is almost certainly a loop (normal usage is 1-3)
         if (!loopDetected && fullText.length % 200 < 50) {
           const toolCallCount = (fullText.match(/<\|tool_call>/g) || []).length
-          if (toolCallCount > 6) {
+          if (toolCallCount > 3) {
             // Keep text up to the 3rd marker
             let idx = -1
             for (let i = 0; i < 3; i++) {
@@ -133,6 +134,10 @@ async function* openAIStreamToAnthropicStream(
 
         if (loopDetected) {
           loopWasDetected = true
+          // Cancel the reader to stop consuming the HTTP stream immediately.
+          // Without this, the outer while loop keeps reading chunks until the
+          // model finishes generating — which can take 10+ minutes for a looping model.
+          reader.cancel().catch(() => {})
           break
         }
       }
@@ -156,57 +161,64 @@ async function* openAIStreamToAnthropicStream(
     }
   }
 
-  // If a loop was detected, append a visible warning text block so the user knows
-  // and the model gets feedback to try a different approach on the next turn
+  // If a loop was detected, append a recovery marker and DO NOT execute any
+  // tool calls from the truncated text. The [LOOP_RECOVERY] marker lets the
+  // query loop in query.ts detect this and auto-retry with a different approach.
   if (loopWasDetected) {
-    const warningText = '\n\n[Loop detected: your output was repeating. The response was truncated. Try a different approach — do NOT retry the same tool call.]'
+    const warningText = '\n\n[LOOP_RECOVERY] Your output was repeating and was truncated. The repeated tool calls were NOT executed. You MUST try a completely different approach — if a file was missing, check with `ls` first; if a command failed, try an alternative; if you are stuck, explain what you need and ask the user.'
     yield { type: 'content_block_start', index: translationState.blockIndex, content_block: { type: 'text', text: '' } }
     yield { type: 'content_block_delta', index: translationState.blockIndex, delta: { type: 'text_delta', text: warningText } }
     yield { type: 'content_block_stop', index: translationState.blockIndex }
     translationState.blockIndex++
     translationState.isFirstChunk = false
-    fullText += warningText
+    // Do NOT add to fullText — we skip tool parsing below
   }
 
-  // After stream completes, check for tool calls in text (for tool-less models)
-  const { parseToolCallsFromText } = await import('./toolPromptInjection.js')
-  const parsedCalls = parseToolCallsFromText(fullText)
-  if (parsedCalls.length > 0) {
-    // Emit synthetic tool_use content blocks
-    for (const call of parsedCalls) {
-      yield { type: 'content_block_start', index: translationState.blockIndex, content_block: { type: 'tool_use', id: call.id, name: call.name, input: {} } }
-      yield { type: 'content_block_delta', index: translationState.blockIndex, delta: { type: 'input_json_delta', partial_json: JSON.stringify(call.input) } }
-      yield { type: 'content_block_stop', index: translationState.blockIndex }
-      translationState.blockIndex++
-    }
-    // Override the stop reason to tool_use
-    if (deferredMessageDelta) {
-      const md = deferredMessageDelta as any
-      deferredMessageDelta = {
-        ...md,
-        delta: { ...md.delta, stop_reason: 'tool_use' },
+  // After stream completes, check for tool calls in text (for tool-less models).
+  // CRITICAL: skip when loop was detected — the looping tool call is the cause,
+  // executing it would just feed the next loop iteration.
+  if (!loopWasDetected) {
+    const { parseToolCallsFromText } = await import('./toolPromptInjection.js')
+    const parsedCalls = parseToolCallsFromText(fullText)
+    if (parsedCalls.length > 0) {
+      // Emit synthetic tool_use content blocks
+      for (const call of parsedCalls) {
+        yield { type: 'content_block_start', index: translationState.blockIndex, content_block: { type: 'tool_use', id: call.id, name: call.name, input: {} } }
+        yield { type: 'content_block_delta', index: translationState.blockIndex, delta: { type: 'input_json_delta', partial_json: JSON.stringify(call.input) } }
+        yield { type: 'content_block_stop', index: translationState.blockIndex }
+        translationState.blockIndex++
+      }
+      // Override the stop reason to tool_use
+      if (deferredMessageDelta) {
+        const md = deferredMessageDelta as any
+        deferredMessageDelta = {
+          ...md,
+          delta: { ...md.delta, stop_reason: 'tool_use' },
+        }
       }
     }
-  }
 
-  // Narration detection: if the model talked about using a tool but didn't
-  // produce a tool_call block, inject corrective feedback so it can self-correct
-  if (parsedCalls.length === 0 && toolNames && toolNames.length > 0 && fullText.length > 20) {
-    const narratedTool = detectNarratedToolCalls(fullText, toolNames)
-    if (narratedTool) {
-      const correction = `\n\n[You described using the ${narratedTool} tool but didn't include a tool_call block. To actually call it, output:\n\`\`\`tool_call\n{"tool": "${narratedTool}", "arguments": {"prompt": "your task here", "description": "short description"}}\n\`\`\`\nOnly the JSON block above triggers tool execution — text descriptions do NOT call tools.]`
-      yield { type: 'content_block_start', index: translationState.blockIndex, content_block: { type: 'text', text: '' } }
-      yield { type: 'content_block_delta', index: translationState.blockIndex, delta: { type: 'text_delta', text: correction } }
-      yield { type: 'content_block_stop', index: translationState.blockIndex }
-      translationState.blockIndex++
-      translationState.isFirstChunk = false
+    // Narration detection: if the model talked about using a tool but didn't
+    // produce a tool_call block, inject corrective feedback so it can self-correct
+    if (parsedCalls.length === 0 && toolNames && toolNames.length > 0 && fullText.length > 20) {
+      const narratedTool = detectNarratedToolCalls(fullText, toolNames)
+      if (narratedTool) {
+        const correction = `\n\n[You described using the ${narratedTool} tool but didn't include a tool_call block. To actually call it, output:\n\`\`\`tool_call\n{"tool": "${narratedTool}", "arguments": {"prompt": "your task here", "description": "short description"}}\n\`\`\`\nOnly the JSON block above triggers tool execution — text descriptions do NOT call tools.]`
+        yield { type: 'content_block_start', index: translationState.blockIndex, content_block: { type: 'text', text: '' } }
+        yield { type: 'content_block_delta', index: translationState.blockIndex, delta: { type: 'text_delta', text: correction } }
+        yield { type: 'content_block_stop', index: translationState.blockIndex }
+        translationState.blockIndex++
+        translationState.isFirstChunk = false
+      }
     }
   }
 
   // Empty response detection: if the model returned no content at all (no text,
   // no tool calls), the UI would render a blank message. Throw so the fallback
   // executor can try the next model in the chain instead of silently swallowing it.
-  const hasContent = !translationState.isFirstChunk || parsedCalls.length > 0 || translationState.blockIndex > 0
+  // When a loop was detected we always emit content blocks (the recovery warning),
+  // so loopWasDetected alone is sufficient to satisfy "has content".
+  const hasContent = !translationState.isFirstChunk || loopWasDetected || translationState.blockIndex > 0
   if (!hasContent) {
     throw new OpenAICompatibleAPIError(
       0,

@@ -17,13 +17,16 @@ interface OpenAIMessage {
 
 /**
  * Builds a compact parameter summary for a tool's JSON schema.
- * Returns something like: path (string, required), content (string)
+ * Shows one level of nested properties for array items / object properties
+ * so models can construct valid inputs for complex tools.
  */
-function summarizeParams(params: Record<string, unknown>): string {
+function summarizeParams(params: Record<string, unknown>, depth = 0): string {
   const props = (params.properties ?? {}) as Record<string, Record<string, unknown>>
   const required = new Set((params.required ?? []) as string[])
-  const entries = Object.entries(props).slice(0, 10) // cap at 10 params
+  const cap = depth === 0 ? 10 : 6
+  const entries = Object.entries(props).slice(0, cap)
   if (entries.length === 0) return '(no parameters)'
+  const indent = '  '.repeat(depth + 1)
   return entries
     .map(([name, schema]) => {
       const type = schema.type ?? 'any'
@@ -31,7 +34,19 @@ function summarizeParams(params: Record<string, unknown>): string {
       const desc = schema.description
         ? ` — ${(schema.description as string).slice(0, 80)}`
         : ''
-      return `  - ${name} (${type}${req})${desc}`
+      let line = `${indent}- ${name} (${type}${req})${desc}`
+
+      // Show one level of nesting so models know the expected shape
+      if (depth < 1) {
+        const items = schema.items as Record<string, unknown> | undefined
+        if (type === 'array' && items?.properties) {
+          line += `\n${indent}  Each item:\n` + summarizeParams(items, depth + 1)
+        } else if (type === 'object' && schema.properties) {
+          line += '\n' + summarizeParams(schema as Record<string, unknown>, depth + 1)
+        }
+      }
+
+      return line
     })
     .join('\n')
 }
@@ -89,10 +104,44 @@ interface ParsedToolCall {
 }
 
 /**
+ * Extracts a balanced JSON object from text starting at startIdx.
+ * Handles nested braces, strings with escaped characters, and
+ * literal newlines inside strings (sanitized to \\n for JSON.parse).
+ */
+function extractBalancedJSON(text: string, startIdx: number): string | null {
+  if (text[startIdx] !== '{') return null
+  let depth = 0
+  let inString = false
+  let escape = false
+  let result = ''
+  for (let i = startIdx; i < text.length; i++) {
+    const ch = text[i]
+    if (escape) { result += ch; escape = false; continue }
+    if (ch === '\\' && inString) { result += ch; escape = true; continue }
+    if (ch === '"') { result += ch; inString = !inString; continue }
+    // Sanitize literal newlines inside strings → \n for valid JSON
+    if (inString && (ch === '\n' || ch === '\r')) {
+      result += '\\n'
+      if (ch === '\r' && text[i + 1] === '\n') i++
+      continue
+    }
+    if (!inString) {
+      if (ch === '{') depth++
+      else if (ch === '}') {
+        depth--
+        if (depth === 0) { result += ch; return result }
+      }
+    }
+    result += ch
+  }
+  return null
+}
+
+/**
  * Parses tool call attempts from model text output.
  * Supports multiple formats:
  *   1. ```tool_call\n{"tool":"X","arguments":{...}}\n```
- *   2. {"tool":"X","arguments":{...}}  (bare JSON in text)
+ *   2. {"tool":"X","arguments":{...}}  (bare JSON in text, brace-balanced)
  *   3. <|tool_call>call:ToolName{args:{...}}<tool_call|>  (Gemma native)
  *
  * Also deduplicates repeated identical calls (loop detection).
@@ -117,19 +166,25 @@ export function parseToolCallsFromText(text: string): ParsedToolCall[] {
   let match
   while ((match = fencedRegex.exec(text)) !== null) {
     try {
-      const parsed = JSON.parse(match[1].trim())
+      // Use extractBalancedJSON to handle multiline strings with literal newlines
+      const balanced = extractBalancedJSON(match[1].trim(), 0)
+      const parsed = JSON.parse(balanced ?? match[1].trim())
       if (parsed.tool && typeof parsed.tool === 'string') {
         addCall(parsed.tool, parsed.arguments ?? {})
       }
     } catch { /* skip malformed */ }
   }
 
-  // Format 2: bare {"tool":"X","arguments":{...}} in text (not inside fenced blocks)
-  const bareRegex = /\{"tool"\s*:\s*"(\w+)"\s*,\s*"arguments"\s*:\s*(\{[^}]*\})\}/g
-  while ((match = bareRegex.exec(text)) !== null) {
+  // Format 2: bare {"tool":"X","arguments":{...}} in text (brace-balanced extraction)
+  const toolStartRegex = /\{"tool"\s*:\s*"/g
+  while ((match = toolStartRegex.exec(text)) !== null) {
+    const fullJson = extractBalancedJSON(text, match.index)
+    if (!fullJson) continue
     try {
-      const input = JSON.parse(match[2])
-      addCall(match[1], input)
+      const parsed = JSON.parse(fullJson)
+      if (parsed.tool && typeof parsed.tool === 'string') {
+        addCall(parsed.tool, parsed.arguments ?? {})
+      }
     } catch { /* skip malformed */ }
   }
 
@@ -172,11 +227,25 @@ export function parseToolCallsFromText(text: string): ParsedToolCall[] {
         if (Object.keys(pairs).length > 0) {
           addCall(toolName, pairs)
         } else {
-          // Fallback: try JSON-like conversion
-          const jsonAttempt = argsStr.replace(/(\w+):/g, '"$1":').replace(/'/g, '"')
-          try {
-            addCall(toolName, JSON.parse(`{${jsonAttempt}}`))
-          } catch {
+          // Fallback: split on comma-then-key boundaries to handle colons in values
+          // e.g. "query:select:AskUserQuestion,max_results:1" splits correctly
+          const segments = argsStr.split(/,\s*(?=\w+\s*:)/)
+          const segPairs: Record<string, unknown> = {}
+          for (const seg of segments) {
+            const colonIdx = seg.indexOf(':')
+            if (colonIdx === -1) continue
+            const key = seg.slice(0, colonIdx).trim()
+            if (!key || /\s/.test(key)) continue
+            let val = seg.slice(colonIdx + 1).trim()
+            val = val.replace(/^["']|["']$/g, '')
+            if (val === 'true') segPairs[key] = true
+            else if (val === 'false') segPairs[key] = false
+            else if (/^\d+(\.\d+)?$/.test(val) && val !== '') segPairs[key] = Number(val)
+            else segPairs[key] = val
+          }
+          if (Object.keys(segPairs).length > 0) {
+            addCall(toolName, segPairs)
+          } else {
             addCall(toolName, { raw: argsStr })
           }
         }

@@ -87,6 +87,46 @@ describe('injectToolsIntoSystemPrompt', () => {
     expect(result.content).toContain('offset (number)')
     expect(result.content).toContain('File path to read')
   })
+
+  it('shows nested schema for array items with properties', () => {
+    const tools = [
+      {
+        type: 'function',
+        function: {
+          name: 'ask_user',
+          description: 'Ask the user a question',
+          parameters: {
+            type: 'object',
+            properties: {
+              questions: {
+                type: 'array',
+                description: 'Questions to ask',
+                items: {
+                  type: 'object',
+                  properties: {
+                    question: { type: 'string', description: 'The question text' },
+                    header: { type: 'string', description: 'Short label' },
+                    multiSelect: { type: 'boolean', description: 'Allow multiple' },
+                  },
+                  required: ['question', 'header'],
+                },
+              },
+            },
+            required: ['questions'],
+          },
+        },
+      },
+    ]
+    const result = injectToolsIntoSystemPrompt(
+      { role: 'system', content: '' },
+      tools as Parameters<typeof injectToolsIntoSystemPrompt>[1],
+    )
+    expect(result.content).toContain('questions (array, required)')
+    expect(result.content).toContain('Each item:')
+    expect(result.content).toContain('question (string, required)')
+    expect(result.content).toContain('header (string, required)')
+    expect(result.content).toContain('multiSelect (boolean)')
+  })
 })
 
 describe('parseToolCallsFromText', () => {
@@ -150,14 +190,43 @@ describe('parseToolCallsFromText', () => {
     expect(calls[0].input).toHaveProperty('prompt')
   })
 
-  it('limits to 3 unique tool calls max', () => {
-    const text = [
-      '```tool_call\n{"tool": "a", "arguments": {"x": 1}}\n```',
-      '```tool_call\n{"tool": "b", "arguments": {"x": 2}}\n```',
-      '```tool_call\n{"tool": "c", "arguments": {"x": 3}}\n```',
-      '```tool_call\n{"tool": "d", "arguments": {"x": 4}}\n```',
-    ].join('\n')
+  it('limits to 10 unique tool calls max', () => {
+    const text = Array.from({ length: 12 }, (_, i) =>
+      `\`\`\`tool_call\n{"tool": "t${i}", "arguments": {"x": ${i}}}\n\`\`\``
+    ).join('\n')
     const calls = parseToolCallsFromText(text)
-    expect(calls).toHaveLength(3)
+    expect(calls).toHaveLength(10)
+  })
+
+  it('parses bare JSON with nested objects (brace-balanced)', () => {
+    const text = 'Here is the call: {"tool": "AskUserQuestion", "arguments": {"questions": [{"question": "Which?", "header": "Choice", "options": [{"label": "A", "description": "Option A"}], "multiSelect": false}]}} done.'
+    const calls = parseToolCallsFromText(text)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].name).toBe('AskUserQuestion')
+    expect(calls[0].input).toHaveProperty('questions')
+    expect((calls[0].input as any).questions[0].header).toBe('Choice')
+  })
+
+  it('parses bare JSON with multiline string values', () => {
+    const text = '{"tool": "Bash", "arguments": {"command": "echo hello\nworld"}}'
+    const calls = parseToolCallsFromText(text)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].name).toBe('Bash')
+    expect(calls[0].input.command).toBe('echo hello\nworld')
+  })
+
+  it('parses Gemma format with colons in values', () => {
+    const text = '<|tool_call>call:ToolSearch{query:select:AskUserQuestion,max_results:1}<tool_call|>'
+    const calls = parseToolCallsFromText(text)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].name).toBe('ToolSearch')
+    expect(calls[0].input).toEqual({ query: 'select:AskUserQuestion', max_results: 1 })
+  })
+
+  it('parses Gemma format with boolean and numeric values', () => {
+    const text = '<|tool_call>call:MyTool{enabled:true,count:42,name:hello}<tool_call|>'
+    const calls = parseToolCallsFromText(text)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].input).toEqual({ enabled: true, count: 42, name: 'hello' })
   })
 })

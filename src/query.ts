@@ -1490,6 +1490,21 @@ async function* queryLoop(
           'Loop detected in model output — auto-recovering with a fresh approach.',
           'warning',
         )
+
+        // For local models, wait for the server to free the slot before retrying.
+        // The abort signal tears down the TCP connection, but the server needs
+        // time to cancel generation and release the slot.
+        if (currentModel && currentModel.includes('/')) {
+          const { waitForLocalServerReady } = await import('./services/api/adapters/OpenAIStreamClient.js')
+          const ready = await waitForLocalServerReady(currentModel)
+          if (!ready) {
+            yield createSystemMessage(
+              'Local model server did not become ready in time. The previous generation may still be running.',
+              'warning',
+            )
+          }
+        }
+
         const recoveryMessage = createUserMessage({
           content:
             '[System: loop recovery] Your previous response got stuck repeating the same output and was truncated. ' +

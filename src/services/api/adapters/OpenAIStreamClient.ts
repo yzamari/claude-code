@@ -38,6 +38,7 @@ async function* openAIStreamToAnthropicStream(
   response: Response,
   model: string,
   toolNames?: string[],
+  fetchAbortController?: AbortController,
 ): AsyncGenerator<unknown> {
   const messageId = `msg_${randomUUID().replace(/-/g, '').slice(0, 24)}`
 
@@ -150,9 +151,13 @@ async function* openAIStreamToAnthropicStream(
 
         if (loopDetected) {
           loopWasDetected = true
-          // Cancel the reader to stop consuming the HTTP stream immediately.
-          // Without this, the outer while loop keeps reading chunks until the
-          // model finishes generating — which can take 10+ minutes for a looping model.
+          // Abort the fetch connection to tear down the TCP stream. This makes
+          // llama.cpp detect the disconnect and stop generation, freeing the
+          // slot for the recovery retry. reader.cancel() alone only stops
+          // reading on the client side — the server keeps generating.
+          if (fetchAbortController) {
+            fetchAbortController.abort()
+          }
           reader.cancel().catch(() => {})
           break
         }
@@ -407,9 +412,15 @@ export function createOpenAICompatibleClient(config: OpenAIClientConfig) {
             // default ~4min SDK timeout. Local models with "thinking" can take
             // several minutes before producing the first token.
             const isLocal = config.baseUrl?.match(/localhost|127\.0\.0\.1/) !== null
-            const fetchSignal = isLocal
+            // AbortController for tearing down the connection on loop detection.
+            // Combined with the timeout signal so either can abort the fetch.
+            const loopAbortController = new AbortController()
+            const timeoutSignal = isLocal
               ? AbortSignal.timeout(600_000) // 10 minutes for local models
               : options?.signal
+            const fetchSignal = timeoutSignal
+              ? AbortSignal.any([loopAbortController.signal, timeoutSignal])
+              : loopAbortController.signal
 
             let response: Response
             try {
@@ -441,7 +452,7 @@ export function createOpenAICompatibleClient(config: OpenAIClientConfig) {
 
             // Pass tool names so stream can detect narrated (not actually called) tools
             const allToolNames = tools?.map(t => t.name) ?? []
-            const stream = openAIStreamToAnthropicStream(response, config.model, allToolNames)
+            const stream = openAIStreamToAnthropicStream(response, config.model, allToolNames, loopAbortController)
             const streamObj = Object.assign(stream, {
               controller: new AbortController(),
             })
@@ -478,4 +489,64 @@ export function createOpenAICompatibleClient(config: OpenAIClientConfig) {
       },
     },
   }
+}
+
+/**
+ * Well-known local provider base URLs (duplicated from client.ts to avoid
+ * circular imports). Only localhost providers are relevant here.
+ */
+const LOCAL_PROVIDER_URLS: Record<string, string> = {
+  ollama: 'http://localhost:11434/v1',
+  tq: 'http://localhost:8323/v1',
+  llama: 'http://localhost:8324/v1',
+  lmstudio: 'http://localhost:1234/v1',
+  llamacpp: 'http://localhost:8080/v1',
+  vllm: 'http://localhost:8000/v1',
+  localai: 'http://localhost:8080/v1',
+}
+
+/**
+ * Resolves the base URL for a model spec (e.g. "llama/gemma4-heretic").
+ * Returns null for non-local or unknown providers.
+ */
+function resolveLocalBaseUrl(modelSpec: string): string | null {
+  const slashIndex = modelSpec.indexOf('/')
+  if (slashIndex === -1) return null
+  const provider = modelSpec.slice(0, slashIndex)
+  return LOCAL_PROVIDER_URLS[provider] ?? null
+}
+
+/**
+ * Polls a local model server until it responds to a lightweight request,
+ * or until maxWaitMs elapses. Used before loop recovery retries to ensure
+ * the server has freed its slot after an aborted generation.
+ *
+ * Returns true if the server is ready, false if it timed out.
+ */
+export async function waitForLocalServerReady(
+  modelSpec: string,
+  maxWaitMs = 15_000,
+  intervalMs = 500,
+): Promise<boolean> {
+  const baseUrl = resolveLocalBaseUrl(modelSpec)
+  if (!baseUrl) return true // Not a local model, skip
+
+  const deadline = Date.now() + maxWaitMs
+  while (Date.now() < deadline) {
+    try {
+      // GET /v1/models is lightweight and doesn't occupy a slot
+      const resp = await fetch(`${baseUrl}/models`, {
+        signal: AbortSignal.timeout(2000),
+      })
+      if (resp.ok) {
+        logForDebugging(`[LOOP RECOVERY] Local server ready at ${baseUrl}`)
+        return true
+      }
+    } catch {
+      // Connection refused or timeout — server still busy or restarting
+    }
+    await new Promise(r => setTimeout(r, intervalMs))
+  }
+  logForDebugging(`[LOOP RECOVERY] Timed out waiting for ${baseUrl} after ${maxWaitMs}ms`)
+  return false
 }

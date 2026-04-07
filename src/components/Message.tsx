@@ -1,4 +1,5 @@
 import { c as _c } from "react/compiler-runtime";
+import { getShowThinking } from '../bootstrap/state.js';
 import { feature } from 'bun:bundle';
 import type { BetaContentBlock } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs';
 import type { ImageBlockParam, TextBlockParam, ThinkingBlockParam, ToolResultBlockParam, ToolUseBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
@@ -538,19 +539,22 @@ function AssistantMessageBlock(t0) {
       }
     case "thinking":
       {
-        if (!isTranscriptMode && !verbose) {
+        const showThinkingFlag = getShowThinking();
+        if (!isTranscriptMode && !verbose && !showThinkingFlag) {
           return null;
         }
         const isLastThinking = !lastThinkingBlockId || thinkingBlockId === lastThinkingBlockId;
         const t1 = isTranscriptMode && !isLastThinking;
+        // When --show-thinking is active, always show full thinking (treat as verbose)
+        const effectiveVerbose = verbose || showThinkingFlag;
         let t2;
-        if ($[31] !== addMargin || $[32] !== isTranscriptMode || $[33] !== param || $[34] !== t1 || $[35] !== verbose) {
-          t2 = <AssistantThinkingMessage addMargin={addMargin} param={param} isTranscriptMode={isTranscriptMode} verbose={verbose} hideInTranscript={t1} />;
+        if ($[31] !== addMargin || $[32] !== isTranscriptMode || $[33] !== param || $[34] !== t1 || $[35] !== effectiveVerbose) {
+          t2 = <AssistantThinkingMessage addMargin={addMargin} param={param} isTranscriptMode={isTranscriptMode} verbose={effectiveVerbose} hideInTranscript={t1} />;
           $[31] = addMargin;
           $[32] = isTranscriptMode;
           $[33] = param;
           $[34] = t1;
-          $[35] = verbose;
+          $[35] = effectiveVerbose;
           $[36] = t2;
         } else {
           t2 = $[36];

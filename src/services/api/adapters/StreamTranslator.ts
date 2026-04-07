@@ -35,6 +35,10 @@ interface TranslationState {
   blockIndex: number
   isFirstChunk: boolean
   hasToolCalls?: boolean
+  // Track whether we're currently inside a thinking block (for --show-thinking)
+  inThinkingBlock?: boolean
+  // Track whether we've transitioned to regular content (thinking is done)
+  startedTextContent?: boolean
 }
 
 // Minimal Anthropic event types — only the fields the streaming pipeline reads.
@@ -73,6 +77,7 @@ const FINISH_REASON_MAP: Record<string, string> = {
 export function translateOpenAIChunkToAnthropicEvents(
   chunk: OpenAIChunk,
   state: TranslationState,
+  showThinking?: boolean,
 ): AnthropicStreamEvent[] {
   const events: AnthropicStreamEvent[] = []
   const choice = chunk.choices[0]
@@ -85,31 +90,97 @@ export function translateOpenAIChunkToAnthropicEvents(
   //   - Ollama thinking models: delta.reasoning (content is "")
   //   - llama.cpp thinking models: delta.reasoning_content (content has the answer)
   const rawContent = delta.content
-  const textContent = (rawContent != null && rawContent !== '' ? rawContent : null)
-    ?? (delta as any).reasoning_content
-    ?? (delta as any).reasoning
-    ?? null
-  // Strip model special tokens before display (keeps raw text for tool parsing upstream)
-  const displayText = textContent != null && textContent !== ''
-    ? stripModelSpecialTokens(textContent)
-    : null
-  if (displayText != null && displayText !== '') {
-    if (state.isFirstChunk) {
+  const reasoningContent = (delta as any).reasoning_content ?? (delta as any).reasoning ?? null
+
+  if (showThinking) {
+    // --show-thinking mode: emit reasoning as thinking blocks, content as text blocks
+
+    // Handle reasoning content → thinking blocks
+    const reasoningText = reasoningContent != null && reasoningContent !== ''
+      ? stripModelSpecialTokens(reasoningContent)
+      : null
+    if (reasoningText != null && reasoningText !== '') {
+      if (!state.inThinkingBlock) {
+        // Start a new thinking block
+        state.inThinkingBlock = true
+        events.push({
+          type: 'content_block_start',
+          index: state.blockIndex,
+          content_block: { type: 'thinking', thinking: '' },
+        })
+        state.isFirstChunk = false
+      }
       events.push({
-        type: 'content_block_start',
+        type: 'content_block_delta',
         index: state.blockIndex,
-        content_block: { type: 'text', text: '' },
+        delta: { type: 'thinking_delta', thinking: reasoningText },
       })
     }
-    events.push({
-      type: 'content_block_delta',
-      index: state.blockIndex,
-      delta: { type: 'text_delta', text: displayText },
-    })
+
+    // Handle regular content → text blocks
+    const regularText = rawContent != null && rawContent !== ''
+      ? stripModelSpecialTokens(rawContent)
+      : null
+    if (regularText != null && regularText !== '') {
+      // If we were in a thinking block, close it first
+      if (state.inThinkingBlock) {
+        events.push({
+          type: 'content_block_stop',
+          index: state.blockIndex,
+        })
+        state.blockIndex++
+        state.inThinkingBlock = false
+      }
+      if (!state.startedTextContent) {
+        // Start a new text block
+        state.startedTextContent = true
+        events.push({
+          type: 'content_block_start',
+          index: state.blockIndex,
+          content_block: { type: 'text', text: '' },
+        })
+        state.isFirstChunk = false
+      }
+      events.push({
+        type: 'content_block_delta',
+        index: state.blockIndex,
+        delta: { type: 'text_delta', text: regularText },
+      })
+    }
+  } else {
+    // Default mode: merge reasoning + content into text (original behavior)
+    const textContent = (rawContent != null && rawContent !== '' ? rawContent : null)
+      ?? reasoningContent
+      ?? null
+    const displayText = textContent != null && textContent !== ''
+      ? stripModelSpecialTokens(textContent)
+      : null
+    if (displayText != null && displayText !== '') {
+      if (state.isFirstChunk) {
+        events.push({
+          type: 'content_block_start',
+          index: state.blockIndex,
+          content_block: { type: 'text', text: '' },
+        })
+      }
+      events.push({
+        type: 'content_block_delta',
+        index: state.blockIndex,
+        delta: { type: 'text_delta', text: displayText },
+      })
+    }
   }
 
-  // Tool calls
+  // Tool calls — close any open thinking block first
   if (delta.tool_calls) {
+    if (state.inThinkingBlock) {
+      events.push({
+        type: 'content_block_stop',
+        index: state.blockIndex,
+      })
+      state.blockIndex++
+      state.inThinkingBlock = false
+    }
     for (const tc of delta.tool_calls) {
       // Gemini may omit the index field (OpenAI always includes it).
       // Default to 0 when missing so blockIndex arithmetic stays valid.

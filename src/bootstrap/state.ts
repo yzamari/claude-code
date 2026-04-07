@@ -254,6 +254,10 @@ type State = {
   // logAPISuccess to tag the first post-compaction API call so we can
   // distinguish compaction-induced cache misses from TTL expiry.
   pendingPostCompaction: boolean
+  // Debug flag: log raw stream chunks from external models to debug log
+  debugStream: boolean
+  // Flag: emit reasoning_content/reasoning as thinking blocks and display them
+  showThinking: boolean
 }
 
 // ALSO HERE - THINK THRICE BEFORE MODIFYING
@@ -420,6 +424,8 @@ function getInitialState(): State {
     lastMainRequestId: undefined,
     lastApiCompletionTimestamp: null,
     pendingPostCompaction: false,
+    debugStream: false,
+    showThinking: false,
   }
 
   return state
@@ -1762,4 +1768,22 @@ export function setPromptId(id: string | null): void {
 // Stub: isReplBridgeActive — internal bridge feature not present in this build
 export function isReplBridgeActive(): boolean {
   return false
+}
+
+// Debug stream: log raw stream chunks from external models
+export function getDebugStream(): boolean {
+  return STATE.debugStream
+}
+
+export function setDebugStream(value: boolean): void {
+  STATE.debugStream = value
+}
+
+// Show thinking: display model reasoning/thinking separately
+export function getShowThinking(): boolean {
+  return STATE.showThinking
+}
+
+export function setShowThinking(value: boolean): void {
+  STATE.showThinking = value
 }

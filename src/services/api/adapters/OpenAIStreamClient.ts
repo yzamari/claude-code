@@ -6,6 +6,7 @@
  */
 
 import { randomUUID } from 'crypto'
+import { getDebugStream, getShowThinking } from '../../../bootstrap/state.js'
 import { logForDebugging } from '../../../utils/debug.js'
 import {
   translateAnthropicToOpenAI,
@@ -53,6 +54,8 @@ async function* openAIStreamToAnthropicStream(
   let deferredMessageDelta: unknown = null
   let loopWasDetected = false
   let specialTokenCount = 0
+  const debugStream = getDebugStream()
+  const showThinking = getShowThinking()
 
   while (true) {
     if (loopWasDetected) break
@@ -80,9 +83,18 @@ async function* openAIStreamToAnthropicStream(
       // Models use different fields: content, reasoning (Ollama), reasoning_content (llama.cpp)
       const delta = chunk.choices[0]?.delta
       const rawContent = delta?.content
+      const reasoningContent = (delta as any)?.reasoning_content ?? (delta as any)?.reasoning ?? null
       const textContent = (rawContent != null && rawContent !== '' ? rawContent : null)
-        ?? (delta as any)?.reasoning_content
-        ?? (delta as any)?.reasoning
+        ?? reasoningContent
+      if (debugStream) {
+        const fields: string[] = []
+        if (rawContent != null && rawContent !== '') fields.push(`content=${JSON.stringify(rawContent)}`)
+        if (reasoningContent != null && reasoningContent !== '') fields.push(`reasoning=${JSON.stringify(reasoningContent)}`)
+        if (delta?.tool_calls) fields.push(`tool_calls=${JSON.stringify(delta.tool_calls)}`)
+        if (fields.length > 0) {
+          logForDebugging(`[STREAM] ${fields.join(' | ')} (fullText=${fullText.length}ch, specialTokens=${specialTokenCount})`)
+        }
+      }
       if (textContent) {
         fullText += textContent
 
@@ -98,6 +110,7 @@ async function* openAIStreamToAnthropicStream(
               if (lastWin === prevWin) {
                 fullText = fullText.slice(0, fullText.length - winSize)
                 loopDetected = true
+                if (debugStream) logForDebugging(`[STREAM LOOP] Strategy 1: window repetition detected (winSize=${winSize})`)
                 break
               }
             }
@@ -109,6 +122,7 @@ async function* openAIStreamToAnthropicStream(
         if (!loopDetected && fullText.length % 200 < 50) {
           const toolCallCount = (fullText.match(/<\|tool_call>/g) || []).length
           if (toolCallCount > 3) {
+            if (debugStream) logForDebugging(`[STREAM LOOP] Strategy 2: ${toolCallCount} tool_call markers detected`)
             // Keep text up to the 3rd marker
             let idx = -1
             for (let i = 0; i < 3; i++) {
@@ -126,7 +140,9 @@ async function* openAIStreamToAnthropicStream(
         if (!loopDetected) {
           const newSpecial = (textContent.match(/<\|[\w]+>|<\/?\w+\|>|<\|[^>]*\|>|\[\/?INST\]/g) || []).length
           specialTokenCount += newSpecial
+          if (debugStream && newSpecial > 0) logForDebugging(`[STREAM] Special tokens in chunk: ${newSpecial} (total: ${specialTokenCount})`)
           if (specialTokenCount > 15) {
+            if (debugStream) logForDebugging(`[STREAM LOOP] Strategy 3: ${specialTokenCount} special tokens exceeded threshold (15)`)
             fullText = ''
             loopDetected = true
           }
@@ -142,7 +158,7 @@ async function* openAIStreamToAnthropicStream(
         }
       }
 
-      const events = translateOpenAIChunkToAnthropicEvents(chunk, translationState)
+      const events = translateOpenAIChunkToAnthropicEvents(chunk, translationState, showThinking)
 
       for (const event of events) {
         // Defer message_delta so we can modify stop_reason if tool calls are found

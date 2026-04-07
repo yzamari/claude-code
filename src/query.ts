@@ -95,6 +95,8 @@ import type { QuerySource } from './constants/querySource.js'
 import { createDumpPromptsFetch } from './services/api/dumpPrompts.js'
 import { StreamingToolExecutor } from './services/tools/StreamingToolExecutor.js'
 import { resolveModelForQuery } from './services/router/resolveRouteForQuery.js'
+import { getModelCapabilities } from './services/router/capabilities.js'
+import { classifyTask, type TaskContext } from './services/router/taskClassifier.js'
 import { queryCheckpoint } from './utils/queryProfiler.js'
 import { runTools } from './services/tools/toolOrchestration.js'
 import { applyToolResultBudget } from './utils/toolResultStorage.js'
@@ -635,6 +637,52 @@ async function* queryLoop(
         permissionMode === 'plan' &&
         doesMostRecentAssistantMessageExceed200k(messagesForQuery),
     })
+
+    // Tool-assist routing: when the user's model can't natively call tools,
+    // automatically route tool-heavy turns to a fast model that can.
+    // The user's model handles reasoning/creative turns; Haiku handles tools.
+    const TOOL_ASSIST_MODEL = 'claude-haiku-4-5'
+    const modelIdForCaps = currentModel.includes('/')
+      ? currentModel.slice(currentModel.lastIndexOf('/') + 1)
+      : currentModel
+    const currentCaps = getModelCapabilities(modelIdForCaps)
+    if (!currentCaps.supportsTools && !routedModel) {
+      // Classify the current turn to decide routing
+      const userPromptForClassify = (() => {
+        const lastUser = messagesForQuery.filter((m: any) => m.type === 'user').at(-1) as any
+        if (!lastUser?.message) return undefined
+        const content = lastUser.message.content
+        if (typeof content === 'string') return content
+        if (Array.isArray(content)) {
+          return content
+            .filter((b: any) => b.type === 'text')
+            .map((b: any) => b.text)
+            .join(' ')
+        }
+        return undefined
+      })()
+      const taskType = classifyTask({
+        activeTools: lastToolNames,
+        messageTokenCount: messagesForQuery.length * 500,
+        isPlanMode: permissionMode === 'plan',
+        isSubagent: !!toolUseContext.agentId,
+        userModelOverride: undefined,
+        userPrompt: userPromptForClassify,
+      })
+
+      // Route to Haiku for tool-heavy task types and after loop recovery
+      const isToolHeavyTask = ['file_search', 'simple_edit', 'test_execution', 'glob', 'grep', 'file_read'].includes(taskType)
+      const isToolContinuation = lastToolNames.length > 0
+      const isPostLoopRecovery = loopRecoveryCount > 0
+
+      if (isToolHeavyTask || isToolContinuation || isPostLoopRecovery) {
+        logForDebugging(
+          `[ToolAssist] ${currentModel} can't natively call tools → routing to ${TOOL_ASSIST_MODEL} ` +
+          `(task=${taskType}, toolCont=${isToolContinuation}, loopRecovery=${isPostLoopRecovery})`,
+        )
+        currentModel = TOOL_ASSIST_MODEL
+      }
+    }
 
     queryCheckpoint('query_setup_end')
 

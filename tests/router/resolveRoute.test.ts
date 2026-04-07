@@ -10,7 +10,7 @@ describe('resolveModelForQuery edge cases', () => {
       providers: { ollama: { type: 'openai-compatible' as const, models: ['qwen'] } },
     }
     const ctx = {
-      lastToolNames: ['GrepTool'],
+      lastToolNames: ['Grep'],
       messageTokenCount: 5000,
       isPlanMode: false,
       isSubagent: false,
@@ -29,7 +29,7 @@ describe('resolveModelForQuery edge cases', () => {
       providers: { ollama: { type: 'openai-compatible' as const, models: ['qwen'] } },
     }
     const r = resolveModelForQuery(config, {
-      lastToolNames: ['GrepTool'],
+      lastToolNames: ['Grep'],
       messageTokenCount: 5000,
       isPlanMode: false,
       isSubagent: false,
@@ -88,7 +88,7 @@ describe('resolveModelForQuery edge cases', () => {
       providers: { ollama: { type: 'openai-compatible' as const, models: ['qwen'] } },
     }
     const r = resolveModelForQuery(config, {
-      lastToolNames: ['GrepTool'],
+      lastToolNames: ['Grep'],
       messageTokenCount: 5000,
       isPlanMode: false,
       isSubagent: false,

@@ -28,7 +28,7 @@ Instead of passing `--settings` on every launch, add `modelRouter` to your setti
       }
     },
     "routes": [
-      { "tasks": ["file_search", "grep"], "model": "ollama/deepseek-coder-v2" },
+      { "tasks": ["file_search"], "model": "ollama/deepseek-coder-v2" },
       { "tasks": ["complex_reasoning", "planning"], "model": "gemini/gemini-3.1-pro-preview" }
     ],
     "fallbackChain": ["gemini/gemini-2.5-flash", "ollama/qwen2.5:0.5b"]
@@ -82,7 +82,7 @@ Edit `~/.claude/settings.json`:
       }
     },
     "routes": [
-      { "tasks": ["file_search", "grep", "glob"], "model": "ollama/qwen2.5-coder:7b" }
+      { "tasks": ["file_search"], "model": "ollama/qwen2.5-coder:7b" }
     ],
     "fallbackChain": ["claude-sonnet-4-6"]
   }
@@ -366,17 +366,16 @@ The router classifies each query into a task type based on context signals and r
 
 | Task Type | Detection Signal | Typical Route |
 |-----------|-----------------|---------------|
-| `file_search` | Active tool is GrepTool, GlobTool, or FileReadTool | Local (cheap/free) |
-| `grep` | GrepTool invocation | Local (cheap/free) |
-| `glob` | GlobTool invocation | Local (cheap/free) |
-| `simple_edit` | Active tool is FileEditTool or FileWriteTool | Local or mid-tier |
-| `file_read` | FileReadTool invocation | Local (cheap/free) |
-| `test_execution` | BashTool running test commands (vitest, jest, pytest, etc.) | Local (cheap/free) |
-| `subagent` | AgentTool or TeamCreateTool invocation | Configurable |
+| `file_search` | Active tool is Grep or Glob | Local (cheap/free) |
+| `simple_edit` | Active tool is Edit or Write | Local or mid-tier |
+| `test_execution` | Bash running test commands (vitest, jest, pytest, etc.) | Local (cheap/free) |
+| `subagent` | Agent or TeamCreate invocation | Configurable |
 | `planning` | Plan mode is active | Claude Opus (high reasoning) |
 | `large_context` | Message history exceeds 100K tokens | Gemini 2.5 Pro (2M context) |
 | `complex_reasoning` | Default for all other queries | Claude (main model) |
 | `user_override` | User explicitly selected a model via `/model` command | Respects user choice |
+
+> **Note:** The deprecated task types `grep`, `glob`, and `file_read` are still accepted in route configs for backward compatibility. They are automatically mapped to `file_search`.
 
 ### Classification Priority
 
@@ -455,7 +454,7 @@ Route cheap tasks locally, reserve Claude for complex work.
       }
     },
     "routes": [
-      { "tasks": ["file_search", "grep", "glob", "file_read"], "model": "ollama/qwen2.5-coder:7b" },
+      { "tasks": ["file_search"], "model": "ollama/qwen2.5-coder:7b" },
       { "tasks": ["test_execution"], "model": "ollama/llama3.2:8b" },
       { "tasks": ["simple_edit"], "model": "ollama/qwen2.5-coder:7b" },
       { "tasks": ["complex_reasoning", "planning"], "model": "claude-opus-4-6" }
@@ -492,7 +491,7 @@ Use the best model from each provider for each task type.
       }
     },
     "routes": [
-      { "tasks": ["file_search", "grep", "glob"], "model": "ollama/qwen2.5-coder:7b" },
+      { "tasks": ["file_search"], "model": "ollama/qwen2.5-coder:7b" },
       { "tasks": ["large_context"], "model": "gemini/gemini-2.5-pro" },
       { "tasks": ["subagent"], "model": "openai/gpt-4o" },
       { "tasks": ["simple_edit"], "model": "openai/gpt-4o-mini" },
@@ -520,7 +519,7 @@ Run entirely offline with local models. No cloud API calls.
       }
     },
     "routes": [
-      { "tasks": ["file_search", "grep", "glob", "file_read", "test_execution"], "model": "ollama/qwen2.5-coder:7b" },
+      { "tasks": ["file_search", "test_execution"], "model": "ollama/qwen2.5-coder:7b" },
       { "tasks": ["simple_edit", "subagent"], "model": "ollama/deepseek-coder-v2:16b" },
       { "tasks": ["complex_reasoning", "planning"], "model": "ollama/deepseek-coder-v2:16b" }
     ],
@@ -546,7 +545,7 @@ Use mlx-turboquant for fast local inference on Apple Silicon with Claude as the 
       }
     },
     "routes": [
-      { "tasks": ["file_search", "grep", "glob", "file_read", "test_execution"], "model": "mlx-tq/qwen2.5-32b-turboquant-3bit" },
+      { "tasks": ["file_search", "test_execution"], "model": "mlx-tq/qwen2.5-32b-turboquant-3bit" },
       { "tasks": ["simple_edit"], "model": "mlx-tq/qwen2.5-32b-turboquant-3bit" },
       { "tasks": ["complex_reasoning", "planning"], "model": "claude-opus-4-6" }
     ],
@@ -573,7 +572,7 @@ Use OpenRouter as a single gateway to access many models.
       }
     },
     "routes": [
-      { "tasks": ["file_search", "grep", "glob"], "model": "openrouter/meta-llama/llama-3.3-70b" },
+      { "tasks": ["file_search"], "model": "openrouter/meta-llama/llama-3.3-70b" },
       { "tasks": ["simple_edit", "subagent"], "model": "openrouter/mistralai/mixtral-8x22b" },
       { "tasks": ["large_context"], "model": "openrouter/google/gemini-2.5-pro" },
       { "tasks": ["complex_reasoning", "planning"], "model": "claude-opus-4-6" }

@@ -167,7 +167,10 @@ export function getModelCapabilities(modelId: string): ModelCapabilities {
   if (known) return { ...DEFAULT_CAPABILITIES, ...known }
 
   // 3. Prefix match: "gpt-4o-mini" matches "gpt-4o", "claude-opus-4-6-20260101" matches "claude-opus-4-6"
-  for (const [prefix, caps] of Object.entries(KNOWN_CAPABILITIES)) {
+  // Sort by descending prefix length so longer/more-specific prefixes match first
+  const sortedEntries = Object.entries(KNOWN_CAPABILITIES)
+    .sort(([a], [b]) => b.length - a.length)
+  for (const [prefix, caps] of sortedEntries) {
     if (modelId.startsWith(prefix)) {
       return { ...DEFAULT_CAPABILITIES, ...caps }
     }

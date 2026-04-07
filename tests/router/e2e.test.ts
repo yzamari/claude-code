@@ -23,8 +23,9 @@ const fullConfig: RouterConfig = {
     },
   },
   routes: [
-    { tasks: ['file_search', 'grep', 'glob'], model: 'ollama/qwen2.5-coder:7b' },
+    { tasks: ['file_search'], model: 'ollama/qwen2.5-coder:7b' },
     { tasks: ['simple_edit'], model: 'ollama/llama3.2:8b' },
+    { tasks: ['test_execution'], model: 'ollama/llama3.2:8b' },
     { tasks: ['large_context'], model: 'gemini/gemini-2.5-pro' },
     { tasks: ['subagent'], model: 'openai/gpt-4o' },
     { tasks: ['complex_reasoning', 'planning'], model: 'claude-opus-4-6' },
@@ -37,7 +38,7 @@ describe('Multi-Model Router E2E', () => {
 
   it('routes grep to local Ollama model with correct capabilities', () => {
     const context: TaskContext = {
-      activeTools: ['GrepTool'],
+      activeTools: ['Grep'],
       messageTokenCount: 5000,
       isPlanMode: false,
       isSubagent: false,
@@ -88,7 +89,7 @@ describe('Multi-Model Router E2E', () => {
 
   it('provides correct fallback chain for recovery', () => {
     const context: TaskContext = {
-      activeTools: ['GrepTool'],
+      activeTools: ['Grep'],
       messageTokenCount: 5000,
       isPlanMode: false,
       isSubagent: false,
@@ -104,10 +105,11 @@ describe('Multi-Model Router E2E', () => {
 
   it('full routing table covers all task types', () => {
     const allContexts: [string, TaskContext][] = [
-      ['file_search', { activeTools: ['GrepTool'], messageTokenCount: 5000, isPlanMode: false, isSubagent: false, userModelOverride: undefined }],
-      ['simple_edit', { activeTools: ['FileEditTool'], messageTokenCount: 5000, isPlanMode: false, isSubagent: false, userModelOverride: undefined }],
+      ['file_search', { activeTools: ['Grep'], messageTokenCount: 5000, isPlanMode: false, isSubagent: false, userModelOverride: undefined }],
+      ['simple_edit', { activeTools: ['Edit'], messageTokenCount: 5000, isPlanMode: false, isSubagent: false, userModelOverride: undefined }],
+      ['test_execution', { activeTools: ['Bash'], messageTokenCount: 5000, isPlanMode: false, isSubagent: false, userModelOverride: undefined, bashCommand: 'npx vitest run tests/' }],
       ['planning', { activeTools: [], messageTokenCount: 5000, isPlanMode: true, isSubagent: false, userModelOverride: undefined }],
-      ['subagent', { activeTools: ['AgentTool'], messageTokenCount: 5000, isPlanMode: false, isSubagent: true, userModelOverride: undefined }],
+      ['subagent', { activeTools: ['Agent'], messageTokenCount: 5000, isPlanMode: false, isSubagent: true, userModelOverride: undefined }],
       ['large_context', { activeTools: [], messageTokenCount: 200_000, isPlanMode: false, isSubagent: false, userModelOverride: undefined }],
       ['complex_reasoning', { activeTools: [], messageTokenCount: 5000, isPlanMode: false, isSubagent: false, userModelOverride: undefined }],
     ]

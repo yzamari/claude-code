@@ -3,10 +3,7 @@ import { lazySchema } from '../../utils/lazySchema.js'
 
 export const TASK_TYPES = [
   'file_search',
-  'glob',
-  'grep',
   'simple_edit',
-  'file_read',
   'test_execution',
   'subagent',
   'planning',
@@ -16,6 +13,20 @@ export const TASK_TYPES = [
 ] as const
 
 export type TaskType = (typeof TASK_TYPES)[number]
+
+// Deprecated aliases accepted in user configs for backward compatibility.
+// classifyTask never returns these — they map to 'file_search' at validation time.
+const DEPRECATED_TASK_ALIASES: Record<string, TaskType> = {
+  grep: 'file_search',
+  glob: 'file_search',
+  file_read: 'file_search',
+}
+
+// All strings the Zod schema should accept (active + deprecated)
+const ALL_ACCEPTED_TASK_TYPES = [
+  ...TASK_TYPES,
+  ...Object.keys(DEPRECATED_TASK_ALIASES),
+] as const
 
 const ProviderConfigSchema = lazySchema(() =>
   z.object({
@@ -28,7 +39,10 @@ const ProviderConfigSchema = lazySchema(() =>
 
 const RouteSchema = lazySchema(() =>
   z.object({
-    tasks: z.array(z.enum(TASK_TYPES)).min(1),
+    tasks: z.array(
+      z.enum(ALL_ACCEPTED_TASK_TYPES as unknown as readonly [string, ...string[]])
+        .transform(t => (DEPRECATED_TASK_ALIASES[t] ?? t) as TaskType)
+    ).min(1),
     model: z.string(),
   }),
 )

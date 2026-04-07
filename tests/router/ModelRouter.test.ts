@@ -18,7 +18,7 @@ const testConfig: RouterConfig = {
     },
   },
   routes: [
-    { tasks: ['file_search', 'grep'], model: 'ollama/qwen2.5-coder:7b' },
+    { tasks: ['file_search'], model: 'ollama/qwen2.5-coder:7b' },
     { tasks: ['subagent'], model: 'openai/gpt-4o' },
     { tasks: ['complex_reasoning'], model: 'claude-opus-4-6' },
   ],
@@ -34,7 +34,7 @@ describe('ModelRouter', () => {
 
   it('routes file_search to ollama', () => {
     const context: TaskContext = {
-      activeTools: ['GrepTool'],
+      activeTools: ['Grep'],
       messageTokenCount: 5000,
       isPlanMode: false,
       isSubagent: false,
@@ -48,7 +48,7 @@ describe('ModelRouter', () => {
 
   it('routes subagent to openai', () => {
     const context: TaskContext = {
-      activeTools: ['AgentTool'],
+      activeTools: ['Agent'],
       messageTokenCount: 5000,
       isPlanMode: false,
       isSubagent: true,
@@ -74,7 +74,7 @@ describe('ModelRouter', () => {
 
   it('returns fallback chain', () => {
     const context: TaskContext = {
-      activeTools: ['GrepTool'],
+      activeTools: ['Grep'],
       messageTokenCount: 5000,
       isPlanMode: false,
       isSubagent: false,
@@ -87,7 +87,7 @@ describe('ModelRouter', () => {
   it('returns native anthropic when router is disabled', () => {
     const disabledRouter = new ModelRouter({ enabled: false, default: 'claude-opus-4-6' })
     const context: TaskContext = {
-      activeTools: ['GrepTool'],
+      activeTools: ['Grep'],
       messageTokenCount: 5000,
       isPlanMode: false,
       isSubagent: false,
@@ -142,7 +142,7 @@ describe('ModelRouter', () => {
 
   it('parses provider/model format correctly', () => {
     const context: TaskContext = {
-      activeTools: ['GrepTool'],
+      activeTools: ['Grep'],
       messageTokenCount: 5000,
       isPlanMode: false,
       isSubagent: false,

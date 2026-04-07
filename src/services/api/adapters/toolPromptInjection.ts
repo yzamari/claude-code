@@ -32,7 +32,8 @@ function summarizeParams(params: Record<string, unknown>, depth = 0): string {
       // Show enum values inline so models know valid options (e.g. "worktree" | "remote")
       const enumVals = schema.enum as string[] | undefined
       const type = enumVals && enumVals.length > 0
-        ? enumVals.slice(0, 6).map(v => `"${v}"`).join(' | ')
+        ? enumVals.slice(0, 6).map(v => `"${v}"`).join(' | ') +
+          (enumVals.length > 6 ? ` | ... (${enumVals.length - 6} more)` : '')
         : (schema.type ?? 'any')
       const req = required.has(name) ? ', required' : ''
       const desc = schema.description
@@ -121,6 +122,11 @@ export function injectToolsIntoSystemPrompt(
     '- Maximum 10 tool calls per response.',
     '- Do NOT describe or narrate tool calls. Output the JSON block directly — never write "I will use X tool" without the actual ```tool_call block.',
     '- To call a tool, you MUST output the ```tool_call block. Writing about a tool in plain text does NOT execute it.',
+    '',
+    'TOOL RESULTS:',
+    '- After you call a tool, the result appears in the next user message as: [Tool Result: ToolName] followed by the output.',
+    '- Read the result carefully, then decide your next action.',
+    '- If a tool returns an error, diagnose the issue and try a different approach.',
     '',
     `Available tools (${tools.length}):\n`,
     toolDescriptions,
@@ -357,9 +363,9 @@ export function detectNarratedToolCalls(text: string, toolNames: string[]): stri
   // "I'm going to invoke Read", "Using the Grep tool to..."
   const namePattern = toolNames.join('|')
   const patterns = [
-    new RegExp(`I(?:'ll| will| am going to| shall)\\s+(?:use|launch|call|invoke|run|execute|start|spawn)\\s+(?:the\\s+)?(?:${namePattern})\\b`, 'i'),
-    new RegExp(`(?:Let me|I'm going to|I need to)\\s+(?:use|launch|call|invoke|run|start|spawn)\\s+(?:the\\s+)?(?:${namePattern})\\b`, 'i'),
-    new RegExp(`(?:Using|Launching|Calling|Invoking|Running|Spawning)\\s+(?:the\\s+)?(?:${namePattern})\\s+(?:tool|agent)`, 'i'),
+    new RegExp(`I(?:'ll| will| am going to| shall)\\s+(?:use|launch|call|invoke|run|execute|start|spawn)\\s+(?:(?:the|an?)\\s+)?(?:${namePattern})\\b`, 'i'),
+    new RegExp(`(?:Let me|I'm going to|I need to)\\s+(?:use|launch|call|invoke|run|start|spawn)\\s+(?:(?:the|an?)\\s+)?(?:${namePattern})\\b`, 'i'),
+    new RegExp(`(?:Using|Launching|Calling|Invoking|Running|Spawning)\\s+(?:(?:the|an?)\\s+)?(?:${namePattern})\\s+(?:tool|agent)`, 'i'),
   ]
 
   for (const pattern of patterns) {

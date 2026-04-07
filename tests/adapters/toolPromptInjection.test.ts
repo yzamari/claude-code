@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   injectToolsIntoSystemPrompt,
   parseToolCallsFromText,
+  detectNarratedToolCalls,
 } from 'src/services/api/adapters/toolPromptInjection.js'
 
 describe('injectToolsIntoSystemPrompt', () => {
@@ -616,5 +617,120 @@ describe('parseGemmaArgs edge cases (via parseToolCallsFromText)', () => {
     // With matching-pair-only stripping, the quote is preserved
     expect(input.command).toBe('"broken quote')
     expect(input.description).toBe('test')
+  })
+})
+
+// ============================================================
+// detectNarratedToolCalls tests
+// ============================================================
+describe('detectNarratedToolCalls', () => {
+  const tools = ['Bash', 'Grep', 'Read', 'Edit', 'Agent']
+
+  it('detects "I will use the Bash tool"', () => {
+    expect(detectNarratedToolCalls('I will use the Bash tool to run the tests.', tools)).toBe('Bash')
+  })
+
+  it('detects "I\'ll launch an agent"', () => {
+    expect(detectNarratedToolCalls("I'll launch an Agent to search the codebase.", tools)).toBe('Agent')
+  })
+
+  it('detects "Let me call Read"', () => {
+    expect(detectNarratedToolCalls('Let me call Read to check the file contents.', tools)).toBe('Read')
+  })
+
+  it('detects "Using the Grep tool"', () => {
+    expect(detectNarratedToolCalls('Using the Grep tool to find all occurrences.', tools)).toBe('Grep')
+  })
+
+  it('detects "I\'m going to invoke Edit"', () => {
+    expect(detectNarratedToolCalls("I'm going to invoke Edit to fix the typo.", tools)).toBe('Edit')
+  })
+
+  it('returns null when no narration detected', () => {
+    expect(detectNarratedToolCalls('The search results show three matches.', tools)).toBeNull()
+  })
+
+  it('returns null for empty text', () => {
+    expect(detectNarratedToolCalls('', tools)).toBeNull()
+  })
+
+  it('returns null for empty tool names', () => {
+    expect(detectNarratedToolCalls('I will use the Bash tool', [])).toBeNull()
+  })
+
+  it('does not false-positive on tool names in regular text', () => {
+    expect(detectNarratedToolCalls('The Bash script runs fine.', tools)).toBeNull()
+  })
+
+  it('detects "Launching the Agent tool"', () => {
+    expect(detectNarratedToolCalls('Launching the Agent tool to help.', tools)).toBe('Agent')
+  })
+
+  it('is case-insensitive on the verb', () => {
+    expect(detectNarratedToolCalls('i will USE the Bash tool', tools)).toBe('Bash')
+  })
+})
+
+// ============================================================
+// injectToolsIntoSystemPrompt — tool result format & enum truncation
+// ============================================================
+describe('injectToolsIntoSystemPrompt — advanced', () => {
+  it('includes TOOL RESULTS guidance', () => {
+    const system = { role: 'system', content: 'You are helpful.' }
+    const tools = [{
+      type: 'function',
+      function: { name: 'test', description: 'A tool', parameters: { type: 'object' } },
+    }]
+    const result = injectToolsIntoSystemPrompt(system, tools)
+    expect(result.content).toContain('TOOL RESULTS:')
+    expect(result.content).toContain('[Tool Result: ToolName]')
+  })
+
+  it('shows enum truncation indicator when >6 values', () => {
+    const system = { role: 'system', content: '' }
+    const tools = [{
+      type: 'function',
+      function: {
+        name: 'picker',
+        description: 'Pick a color',
+        parameters: {
+          type: 'object',
+          properties: {
+            color: {
+              type: 'string',
+              enum: ['red', 'orange', 'yellow', 'green', 'blue', 'indigo', 'violet', 'pink'],
+            },
+          },
+        },
+      },
+    }]
+    const result = injectToolsIntoSystemPrompt(system, tools)
+    expect(result.content).toContain('2 more')
+    expect(result.content).toContain('"red"')
+    expect(result.content).toContain('"indigo"')
+    // pink and violet (7th, 8th) should NOT be shown inline
+    expect(result.content).not.toMatch(/"pink"/)
+  })
+
+  it('shows all enum values when <=6', () => {
+    const system = { role: 'system', content: '' }
+    const tools = [{
+      type: 'function',
+      function: {
+        name: 'picker',
+        description: 'Pick',
+        parameters: {
+          type: 'object',
+          properties: {
+            mode: { type: 'string', enum: ['fast', 'slow', 'auto'] },
+          },
+        },
+      },
+    }]
+    const result = injectToolsIntoSystemPrompt(system, tools)
+    expect(result.content).toContain('"fast"')
+    expect(result.content).toContain('"slow"')
+    expect(result.content).toContain('"auto"')
+    expect(result.content).not.toContain('more')
   })
 })

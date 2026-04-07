@@ -319,6 +319,28 @@ export function createOpenAICompatibleClient(config: OpenAIClientConfig) {
               ? Math.min(params.max_tokens as number, capabilities.maxOutputTokens)
               : capabilities.maxOutputTokens
 
+            // Tool-result conversion: for models with no native tool support,
+            // convert role:'tool' messages to role:'user' (the model never sent
+            // tool_calls, so it won't understand role:'tool' responses).
+            // Also strip tool_calls from assistant messages — the model's original
+            // output was plain text that we parsed; replaying tool_calls confuses it.
+            if (!capabilities.supportsTools) {
+              for (let i = 0; i < openAIMessages.length; i++) {
+                const msg = openAIMessages[i] as any
+                if (msg.role === 'tool') {
+                  // Convert tool result to user message the model can understand
+                  const toolName = msg.name || 'Tool'
+                  openAIMessages[i] = {
+                    role: 'user',
+                    content: `[Tool Result: ${toolName}]\n${msg.content ?? '(no output)'}`,
+                  }
+                } else if (msg.role === 'assistant' && msg.tool_calls) {
+                  // Strip tool_calls — the model sees its own text output, not structured calls
+                  delete msg.tool_calls
+                }
+              }
+            }
+
             // --- End capability enforcement ---
 
             const openAITools = tools && capabilities.supportsTools

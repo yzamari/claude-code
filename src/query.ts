@@ -594,15 +594,25 @@ async function* queryLoop(
       try {
         const { getSettings_DEPRECATED } = require('./utils/settings/settings.js')
         return (getSettings_DEPRECATED() as any)?.modelRouter
-      } catch { return undefined }
+      } catch (e) {
+        logForDebugging(`[Router] Failed to load router settings: ${e}`)
+        return undefined
+      }
     })()
     const lastAssistantMsg = messagesForQuery.filter((m: any) => m.type === 'assistant').at(-1)
-    const lastToolNames: string[] = (lastAssistantMsg as any)?.message?.content
-      ?.filter((b: any) => b.type === 'tool_use')
-      ?.map((b: any) => b.name) ?? []
+    const lastToolUses: Array<{ name: string; input: Record<string, unknown> }> =
+      (lastAssistantMsg as any)?.message?.content
+        ?.filter((b: any) => b.type === 'tool_use') ?? []
+    const lastToolNames: string[] = lastToolUses.map(t => t.name)
+    // Extract the last Bash command so the classifier can detect test_execution
+    const lastBashCommand = lastToolUses
+      .filter(t => t.name === 'Bash')
+      .map(t => t.input?.command as string | undefined)
+      .filter(Boolean)
+      .at(-1)
     // Read LIVE model from AppState — /model command updates this, not toolUseContext.
     // Use the ORIGINAL startup model (before any fallback mutations) for override detection.
-    const liveMainLoopModel = appState.mainLoopModel ?? toolUseContext.options.mainLoopModel
+    const liveMainLoopModel = appState.mainLoopModel ?? originalStartupModel
     // User override detection:
     // 1. /model command changed the model mid-session (live differs from original startup)
     // 2. Startup model differs from router default (e.g. --heretic flag)
@@ -634,6 +644,7 @@ async function* queryLoop(
           isPlanMode: permissionMode === 'plan',
           isSubagent: !!toolUseContext.agentId,
           userModelOverride: undefined,
+          lastBashCommand,
           userPrompt: lastUserPrompt,
         })
     const routedModel = routeResult.model
@@ -664,6 +675,7 @@ async function* queryLoop(
         isPlanMode: permissionMode === 'plan',
         isSubagent: !!toolUseContext.agentId,
         userModelOverride: undefined,
+        bashCommand: lastBashCommand,
         userPrompt: lastUserPrompt,
       })
 
@@ -1945,7 +1957,9 @@ async function* queryLoop(
       turnCount: nextTurnCount,
       maxOutputTokensRecoveryCount: 0,
       hasAttemptedReactiveCompact: false,
-      loopRecoveryCount,
+      // Reset loop recovery count on successful turns — the model is no longer
+      // stuck, so tool-assist routing should stop forcing Haiku.
+      loopRecoveryCount: 0,
       pendingToolUseSummary: nextPendingToolUseSummary,
       maxOutputTokensOverride: undefined,
       stopHookActive,

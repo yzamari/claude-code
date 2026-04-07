@@ -42,17 +42,17 @@ describe.skipIf(() => !ollamaAvailable)('Live Ollama Integration', () => {
       },
     },
     routes: [
-      { tasks: ['file_search', 'grep', 'glob'], model: `ollama/${MODEL}` },
+      { tasks: ['file_search'], model: `ollama/${MODEL}` },
       { tasks: ['simple_edit'], model: `ollama/${MODEL}` },
       { tasks: ['complex_reasoning', 'planning'], model: 'claude-opus-4-6' },
     ],
     fallbackChain: ['claude-sonnet-4-6'],
   }
 
-  it('routes GrepTool queries to Ollama', () => {
+  it('routes Grep queries to Ollama', () => {
     const router = new ModelRouter(config)
     const grepContext: TaskContext = {
-      activeTools: ['GrepTool'],
+      activeTools: ['Grep'],
       messageTokenCount: 5000,
       isPlanMode: false,
       isSubagent: false,
@@ -82,7 +82,9 @@ describe.skipIf(() => !ollamaAvailable)('Live Ollama Integration', () => {
     const ollamaCaps = getModelCapabilities(MODEL)
     const claudeCaps = getModelCapabilities('claude-opus-4-6')
 
-    expect(ollamaCaps.supportsTools).toBe(true)
+    // qwen2.5:0.5b has no exact or prefix match in KNOWN_CAPABILITIES,
+    // so it falls through to DEFAULT_CAPABILITIES (supportsTools: false)
+    expect(ollamaCaps.supportsTools).toBe(false)
     expect(claudeCaps.supportsTools).toBe(true)
     expect(claudeCaps.supportsThinking).toBe(true)
     expect(claudeCaps.maxInputTokens).toBeGreaterThan(0)
@@ -91,9 +93,9 @@ describe.skipIf(() => !ollamaAvailable)('Live Ollama Integration', () => {
   it('classifies tasks correctly for various contexts', () => {
     const cases: [string, TaskContext, string][] = [
       [
-        'GrepTool query',
-        { activeTools: ['GrepTool'], messageTokenCount: 5000, isPlanMode: false, isSubagent: false, userModelOverride: undefined },
-        'grep',
+        'Grep query',
+        { activeTools: ['Grep'], messageTokenCount: 5000, isPlanMode: false, isSubagent: false, userModelOverride: undefined },
+        'file_search',
       ],
       [
         'Plan mode',

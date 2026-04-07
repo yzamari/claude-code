@@ -10,9 +10,9 @@ export interface TaskContext {
   userPrompt?: string
 }
 
-const SEARCH_TOOLS = new Set(['GrepTool', 'GlobTool', 'FileReadTool'])
-const EDIT_TOOLS = new Set(['FileEditTool', 'FileWriteTool'])
-const AGENT_TOOLS = new Set(['AgentTool', 'TeamCreateTool'])
+const SEARCH_TOOLS = new Set(['Grep', 'Glob'])
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
+const AGENT_TOOLS = new Set(['Agent', 'TeamCreate'])
 const LARGE_CONTEXT_THRESHOLD = 100_000
 
 const TEST_COMMAND_PATTERNS = [
@@ -39,7 +39,7 @@ export function classifyTask(context: TaskContext): TaskType {
 
   // Test execution
   if (
-    context.activeTools.includes('BashTool') &&
+    context.activeTools.includes('Bash') &&
     context.bashCommand &&
     TEST_COMMAND_PATTERNS.some(p => p.test(context.bashCommand!))
   ) {

@@ -92,7 +92,12 @@ export class ModelRouter {
     // Look up provider config
     const providerConfig = this.config.providers?.[providerName]
     if (!providerConfig) {
-      // Unknown provider — fall back to default
+      // Unknown provider — warn and fall back to default
+      console.warn(
+        `[ModelRouter] Provider "${providerName}" not configured in router settings. ` +
+        `Model "${modelSpec}" will fall back to default. ` +
+        `Add "${providerName}" to settings.providers to route correctly.`
+      )
       return this.resolveDefault(taskType, fallbackChain)
     }
 
@@ -125,6 +130,12 @@ export class ModelRouter {
     }
 
     const providerConfig = this.config.providers?.[providerName]
+    if (!providerConfig) {
+      console.warn(
+        `[ModelRouter] Provider "${providerName}" not configured (user override "${spec}"). ` +
+        `Add "${providerName}" to settings.providers to route correctly.`
+      )
+    }
     return {
       model,
       providerName,
@@ -154,6 +165,12 @@ export class ModelRouter {
     }
 
     const providerConfig = this.config.providers?.[providerName]
+    if (!providerConfig) {
+      console.warn(
+        `[ModelRouter] Provider "${providerName}" not configured (default "${defaultModel}"). ` +
+        `Add "${providerName}" to settings.providers to route correctly.`
+      )
+    }
     return {
       model: model || defaultModel,
       providerName,

@@ -245,7 +245,7 @@ Routes are configured in `~/.claude/settings.json` under the `modelRouter` key:
       "ollama": { "type": "openai-compatible", "baseUrl": "http://localhost:11434/v1", "models": ["qwen2.5-coder"] }
     },
     "routes": [
-      { "tasks": ["file_search", "glob", "grep"], "model": "gemini/gemini-3.1-flash-lite" },
+      { "tasks": ["file_search"], "model": "gemini/gemini-3.1-flash-lite" },
       { "tasks": ["simple_edit"], "model": "ollama/qwen2.5-coder" }
     ],
     "fallbackChain": ["claude-sonnet-4-6"]

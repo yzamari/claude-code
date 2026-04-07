@@ -212,6 +212,9 @@ type State = {
   pendingToolUseSummary: Promise<ToolUseSummaryMessage | null> | undefined
   stopHookActive: boolean | undefined
   turnCount: number
+  // Loop recovery: how many times we've auto-recovered from stream/turn-level
+  // loops in this query chain. Capped at 1 to prevent infinite recovery cycles.
+  loopRecoveryCount: number
   // Why the previous iteration continued. Undefined on first iteration.
   // Lets tests assert recovery paths fired without inspecting message contents.
   transition: Continue | undefined
@@ -274,6 +277,7 @@ async function* queryLoop(
     stopHookActive: undefined,
     maxOutputTokensRecoveryCount: 0,
     hasAttemptedReactiveCompact: false,
+    loopRecoveryCount: 0,
     turnCount: 1,
     pendingToolUseSummary: undefined,
     transition: undefined,
@@ -322,6 +326,7 @@ async function* queryLoop(
       autoCompactTracking,
       maxOutputTokensRecoveryCount,
       hasAttemptedReactiveCompact,
+      loopRecoveryCount,
       maxOutputTokensOverride,
       pendingToolUseSummary,
       stopHookActive,
@@ -589,18 +594,15 @@ async function* queryLoop(
     const lastToolNames: string[] = (lastAssistantMsg as any)?.message?.content
       ?.filter((b: any) => b.type === 'tool_use')
       ?.map((b: any) => b.name) ?? []
-    // Check if user explicitly selected a model via /model command
-    // getRuntimeMainLoopModel reads the live AppState override set by /model
-    const runtimeModel = getRuntimeMainLoopModel({
-      permissionMode,
-      mainLoopModel: toolUseContext.options.mainLoopModel,
-      exceeds200kTokens:
-        permissionMode === 'plan' &&
-        doesMostRecentAssistantMessageExceed200k(messagesForQuery),
-    })
-    // If the runtime model differs from the router default, user explicitly chose it
-    const isUserOverride = runtimeModel !== routerSettings?.default &&
-      runtimeModel !== toolUseContext.options.mainLoopModel
+    // Read LIVE model from AppState — /model command updates this, not toolUseContext
+    const liveMainLoopModel = appState.mainLoopModel ?? toolUseContext.options.mainLoopModel
+    // User override detection:
+    // 1. /model command changed the model mid-session (live differs from startup)
+    // 2. Startup model differs from router default (e.g. --heretic flag)
+    const modelChangedViaCommand = liveMainLoopModel !== toolUseContext.options.mainLoopModel
+    const startupModelNotDefault = routerSettings?.default &&
+      toolUseContext.options.mainLoopModel !== routerSettings.default
+    const isUserOverride = modelChangedViaCommand || !!startupModelNotDefault
     const routeResult = isUserOverride
       ? { model: null, fallbackChain: [] } // User chose a specific model — skip routing entirely
       : resolveModelForQuery(routerSettings, {
@@ -628,7 +630,7 @@ async function* queryLoop(
 
     let currentModel = routedModel ?? getRuntimeMainLoopModel({
       permissionMode,
-      mainLoopModel: toolUseContext.options.mainLoopModel,
+      mainLoopModel: liveMainLoopModel,
       exceeds200kTokens:
         permissionMode === 'plan' &&
         doesMostRecentAssistantMessageExceed200k(messagesForQuery),
@@ -1159,6 +1161,7 @@ async function* queryLoop(
               autoCompactTracking: tracking,
               maxOutputTokensRecoveryCount,
               hasAttemptedReactiveCompact,
+              loopRecoveryCount,
               maxOutputTokensOverride: undefined,
               pendingToolUseSummary: undefined,
               stopHookActive: undefined,
@@ -1212,6 +1215,7 @@ async function* queryLoop(
             autoCompactTracking: undefined,
             maxOutputTokensRecoveryCount,
             hasAttemptedReactiveCompact: true,
+            loopRecoveryCount,
             maxOutputTokensOverride: undefined,
             pendingToolUseSummary: undefined,
             stopHookActive: undefined,
@@ -1267,6 +1271,7 @@ async function* queryLoop(
             autoCompactTracking: tracking,
             maxOutputTokensRecoveryCount,
             hasAttemptedReactiveCompact,
+            loopRecoveryCount,
             maxOutputTokensOverride: ESCALATED_MAX_TOKENS,
             pendingToolUseSummary: undefined,
             stopHookActive: undefined,
@@ -1295,6 +1300,7 @@ async function* queryLoop(
             autoCompactTracking: tracking,
             maxOutputTokensRecoveryCount: maxOutputTokensRecoveryCount + 1,
             hasAttemptedReactiveCompact,
+            loopRecoveryCount,
             maxOutputTokensOverride: undefined,
             pendingToolUseSummary: undefined,
             stopHookActive: undefined,
@@ -1352,6 +1358,7 @@ async function* queryLoop(
           // here caused an infinite loop: compact → still too long → error →
           // stop hook blocking → compact → … burning thousands of API calls.
           hasAttemptedReactiveCompact,
+          loopRecoveryCount,
           maxOutputTokensOverride: undefined,
           pendingToolUseSummary: undefined,
           stopHookActive: true,
@@ -1388,6 +1395,7 @@ async function* queryLoop(
             autoCompactTracking: tracking,
             maxOutputTokensRecoveryCount: 0,
             hasAttemptedReactiveCompact: false,
+            loopRecoveryCount,
             maxOutputTokensOverride: undefined,
             pendingToolUseSummary: undefined,
             stopHookActive: undefined,
@@ -1409,6 +1417,50 @@ async function* queryLoop(
             queryDepth: queryTracking.depth,
           })
         }
+      }
+
+      // Stream-level loop recovery: the OpenAI stream adapter detected the
+      // model repeating itself and truncated the response with a [LOOP_RECOVERY]
+      // marker. Tool calls from the truncated text were NOT executed. Auto-retry
+      // once with a strong recovery message so the model gets a fresh chance.
+      const lastAssistantForLoop = assistantMessages.at(-1)
+      const hasLoopRecoveryMarker = lastAssistantForLoop?.message.content.some(
+        (block: { type: string; text?: string }) =>
+          block.type === 'text' && typeof block.text === 'string' && block.text.includes('[LOOP_RECOVERY]'),
+      )
+      if (hasLoopRecoveryMarker && loopRecoveryCount < 1) {
+        yield createSystemMessage(
+          'Loop detected in model output — auto-recovering with a fresh approach.',
+          'warning',
+        )
+        const recoveryMessage = createUserMessage({
+          content:
+            '[System: loop recovery] Your previous response got stuck repeating the same output and was truncated. ' +
+            'The repeated tool calls were NOT executed. You MUST now:\n' +
+            '1. Do NOT retry the same tool call that was looping.\n' +
+            '2. Diagnose what went wrong — was a file missing? Did a command fail? Was the path wrong?\n' +
+            '3. Try a completely different approach. For example: check if the file exists with `ls`, use a different command, or ask the user for help.\n' +
+            '4. If you are stuck after 2 different attempts, explain the problem to the user and ask for guidance.',
+          isMeta: true,
+        })
+        state = {
+          messages: [
+            ...messagesForQuery,
+            ...assistantMessages,
+            recoveryMessage,
+          ],
+          toolUseContext,
+          autoCompactTracking: tracking,
+          maxOutputTokensRecoveryCount: 0,
+          hasAttemptedReactiveCompact: false,
+          loopRecoveryCount: loopRecoveryCount + 1,
+          maxOutputTokensOverride: undefined,
+          pendingToolUseSummary: undefined,
+          stopHookActive: undefined,
+          turnCount,
+          transition: { reason: 'loop_recovery' },
+        }
+        continue
       }
 
       return { reason: 'completed' }
@@ -1758,8 +1810,8 @@ async function* queryLoop(
       }
     }
 
-    // Turn-level loop detection: if the model calls the same tools N turns in a row, stop.
-    // Build a signature from this turn's tool calls (name + sorted arg keys).
+    // Turn-level loop detection: if the model calls the same tools N turns in a row,
+    // auto-recover once by injecting a strong redirect. Only stop if recovery already attempted.
     if (toolUseBlocks.length > 0) {
       const sig = toolUseBlocks
         .map(b => `${b.name}(${Object.keys(b.input ?? {}).sort().join(',')})`)
@@ -1774,15 +1826,55 @@ async function* queryLoop(
       if (recentToolSignatures.length >= TURN_LOOP_THRESHOLD) {
         const lastN = recentToolSignatures.slice(-TURN_LOOP_THRESHOLD)
         if (lastN.every(s => s === lastN[0])) {
+          if (loopRecoveryCount < 1) {
+            // Auto-recover: inject recovery message, reset signatures, continue
+            yield createSystemMessage(
+              `Turn-level loop detected (${sig} repeated ${TURN_LOOP_THRESHOLD}x) — auto-recovering.`,
+              'warning',
+            )
+            recentToolSignatures.length = 0
+            const recoveryMessage = createUserMessage({
+              content:
+                `[System: turn-level loop recovery] You called the same tools (${sig}) for ${TURN_LOOP_THRESHOLD} consecutive turns, producing a loop. ` +
+                'The loop has been broken. You MUST now:\n' +
+                '1. STOP calling the same tool with the same pattern.\n' +
+                '2. Analyze WHY the previous attempts failed — read the error messages above.\n' +
+                '3. Try a fundamentally different approach. Examples:\n' +
+                '   - If a file doesn\'t exist, check its location with `ls` or `find`\n' +
+                '   - If a command keeps failing, try an alternative command\n' +
+                '   - If you don\'t know how to proceed, ask the user for guidance\n' +
+                '4. Do NOT retry the same tool call.',
+              isMeta: true,
+            })
+            state = {
+              messages: [
+                ...messagesForQuery,
+                ...assistantMessages,
+                ...toolResults,
+                recoveryMessage,
+              ],
+              toolUseContext: toolUseContextWithQueryTracking,
+              autoCompactTracking: tracking,
+              maxOutputTokensRecoveryCount: 0,
+              hasAttemptedReactiveCompact: false,
+              loopRecoveryCount: loopRecoveryCount + 1,
+              maxOutputTokensOverride: undefined,
+              pendingToolUseSummary: nextPendingToolUseSummary,
+              stopHookActive: undefined,
+              turnCount: nextTurnCount,
+              transition: { reason: 'loop_recovery' },
+            }
+            continue
+          }
+          // Recovery already attempted — hard stop
           yield createAttachmentMessage({
             type: 'max_turns_reached',
             maxTurns: nextTurnCount,
             turnCount: nextTurnCount,
           })
-          // Inject a warning into the tool results so the model sees it if the loop is somehow continued
           toolResults.push(
             createUserMessage({
-              content: `[Turn-level loop detected: you have called the same tools (${sig}) for ${TURN_LOOP_THRESHOLD} consecutive turns. Stopping to prevent infinite looping. Try a completely different approach or ask the user for guidance.]`,
+              content: `[Turn-level loop detected: you have called the same tools (${sig}) for ${TURN_LOOP_THRESHOLD} consecutive turns even after recovery. Stopping. Ask the user for guidance.]`,
             }),
           )
           return { reason: 'max_turns', turnCount: nextTurnCount }
@@ -1808,6 +1900,7 @@ async function* queryLoop(
       turnCount: nextTurnCount,
       maxOutputTokensRecoveryCount: 0,
       hasAttemptedReactiveCompact: false,
+      loopRecoveryCount,
       pendingToolUseSummary: nextPendingToolUseSummary,
       maxOutputTokensOverride: undefined,
       stopHookActive,

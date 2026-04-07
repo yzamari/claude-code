@@ -218,7 +218,10 @@ function parseGemmaArgs(rawArgsStr: string): Record<string, unknown> {
     const key = seg.slice(0, colonIdx).trim()
     if (!key || /\s/.test(key)) continue
     let val = seg.slice(colonIdx + 1).trim()
-    val = val.replace(/^["']|["']$/g, '')
+    // Only strip quotes when they form a matching pair (both present, same char)
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1)
+    }
     if (val === 'true') segPairs[key] = true
     else if (val === 'false') segPairs[key] = false
     else if (/^\d+(\.\d+)?$/.test(val) && val !== '') segPairs[key] = Number(val)

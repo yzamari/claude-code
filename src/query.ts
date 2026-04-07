@@ -96,7 +96,7 @@ import { createDumpPromptsFetch } from './services/api/dumpPrompts.js'
 import { StreamingToolExecutor } from './services/tools/StreamingToolExecutor.js'
 import { resolveModelForQuery } from './services/router/resolveRouteForQuery.js'
 import { getModelCapabilities } from './services/router/capabilities.js'
-import { classifyTask, type TaskContext } from './services/router/taskClassifier.js'
+import { classifyTask } from './services/router/taskClassifier.js'
 import { queryCheckpoint } from './utils/queryProfiler.js'
 import { runTools } from './services/tools/toolOrchestration.js'
 import { applyToolResultBudget } from './utils/toolResultStorage.js'
@@ -284,6 +284,10 @@ async function* queryLoop(
     pendingToolUseSummary: undefined,
     transition: undefined,
   }
+  // Snapshot the startup model BEFORE any fallback mutations can corrupt it.
+  // toolUseContext.options.mainLoopModel is mutated by the fallback executor,
+  // so it's unreliable as a baseline after the first fallback.
+  const originalStartupModel = params.toolUseContext.options.mainLoopModel
   const budgetTracker = feature('TOKEN_BUDGET') ? createBudgetTracker() : null
 
   // task_budget.remaining tracking across compaction boundaries. Undefined
@@ -596,15 +600,32 @@ async function* queryLoop(
     const lastToolNames: string[] = (lastAssistantMsg as any)?.message?.content
       ?.filter((b: any) => b.type === 'tool_use')
       ?.map((b: any) => b.name) ?? []
-    // Read LIVE model from AppState — /model command updates this, not toolUseContext
+    // Read LIVE model from AppState — /model command updates this, not toolUseContext.
+    // Use the ORIGINAL startup model (before any fallback mutations) for override detection.
     const liveMainLoopModel = appState.mainLoopModel ?? toolUseContext.options.mainLoopModel
     // User override detection:
-    // 1. /model command changed the model mid-session (live differs from startup)
+    // 1. /model command changed the model mid-session (live differs from original startup)
     // 2. Startup model differs from router default (e.g. --heretic flag)
-    const modelChangedViaCommand = liveMainLoopModel !== toolUseContext.options.mainLoopModel
+    const modelChangedViaCommand = liveMainLoopModel !== originalStartupModel
     const startupModelNotDefault = routerSettings?.default &&
-      toolUseContext.options.mainLoopModel !== routerSettings.default
+      originalStartupModel !== routerSettings.default
     const isUserOverride = modelChangedViaCommand || !!startupModelNotDefault
+
+    // Extract last user prompt once — shared by router and tool-assist classifier
+    const lastUserPrompt = (() => {
+      const lastUser = messagesForQuery.filter((m: any) => m.type === 'user').at(-1) as any
+      if (!lastUser?.message) return undefined
+      const content = lastUser.message.content
+      if (typeof content === 'string') return content
+      if (Array.isArray(content)) {
+        return content
+          .filter((b: any) => b.type === 'text')
+          .map((b: any) => b.text)
+          .join(' ')
+      }
+      return undefined
+    })()
+
     const routeResult = isUserOverride
       ? { model: null, fallbackChain: [] } // User chose a specific model — skip routing entirely
       : resolveModelForQuery(routerSettings, {
@@ -613,19 +634,7 @@ async function* queryLoop(
           isPlanMode: permissionMode === 'plan',
           isSubagent: !!toolUseContext.agentId,
           userModelOverride: undefined,
-          userPrompt: (() => {
-            const lastUser = messagesForQuery.filter((m: any) => m.type === 'user').at(-1) as any
-            if (!lastUser?.message) return undefined
-            const content = lastUser.message.content
-            if (typeof content === 'string') return content
-            if (Array.isArray(content)) {
-              return content
-                .filter((b: any) => b.type === 'text')
-                .map((b: any) => b.text)
-                .join(' ')
-            }
-            return undefined
-          })(),
+          userPrompt: lastUserPrompt,
         })
     const routedModel = routeResult.model
     const routerFallbackChain = routeResult.fallbackChain
@@ -638,40 +647,28 @@ async function* queryLoop(
         doesMostRecentAssistantMessageExceed200k(messagesForQuery),
     })
 
-    // Tool-assist routing: when the user's model can't natively call tools,
+    // Tool-assist routing: when the resolved model can't natively call tools,
     // automatically route tool-heavy turns to a fast model that can.
     // The user's model handles reasoning/creative turns; Haiku handles tools.
     const TOOL_ASSIST_MODEL = 'claude-haiku-4-5'
+    // Use indexOf (first slash) to match ModelRouter.parseModelSpec behavior —
+    // models like "mlx-community/Qwen3-Coder" have slashes in the model ID itself
     const modelIdForCaps = currentModel.includes('/')
-      ? currentModel.slice(currentModel.lastIndexOf('/') + 1)
+      ? currentModel.slice(currentModel.indexOf('/') + 1)
       : currentModel
     const currentCaps = getModelCapabilities(modelIdForCaps)
-    if (!currentCaps.supportsTools && !routedModel) {
-      // Classify the current turn to decide routing
-      const userPromptForClassify = (() => {
-        const lastUser = messagesForQuery.filter((m: any) => m.type === 'user').at(-1) as any
-        if (!lastUser?.message) return undefined
-        const content = lastUser.message.content
-        if (typeof content === 'string') return content
-        if (Array.isArray(content)) {
-          return content
-            .filter((b: any) => b.type === 'text')
-            .map((b: any) => b.text)
-            .join(' ')
-        }
-        return undefined
-      })()
+    if (!currentCaps.supportsTools) {
       const taskType = classifyTask({
         activeTools: lastToolNames,
         messageTokenCount: messagesForQuery.length * 500,
         isPlanMode: permissionMode === 'plan',
         isSubagent: !!toolUseContext.agentId,
         userModelOverride: undefined,
-        userPrompt: userPromptForClassify,
+        userPrompt: lastUserPrompt,
       })
 
-      // Route to Haiku for tool-heavy task types and after loop recovery
-      const isToolHeavyTask = ['file_search', 'simple_edit', 'test_execution', 'glob', 'grep', 'file_read'].includes(taskType)
+      // Route to Haiku for tool-heavy task types, subagents, and after loop recovery
+      const isToolHeavyTask = ['file_search', 'simple_edit', 'test_execution', 'subagent'].includes(taskType)
       const isToolContinuation = lastToolNames.length > 0
       const isPostLoopRecovery = loopRecoveryCount > 0
 

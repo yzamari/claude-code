@@ -103,7 +103,7 @@ async function* openAIStreamToAnthropicStream(
         let loopDetected = false
 
         // Strategy 1: window-based repetition detection (needs enough text)
-        if (fullText.length > 3000 && fullText.length % 500 < 50) {
+        if (fullText.length > 1000 && fullText.length % 500 < 50) {
           for (const winSize of [500, 1000, 2000]) {
             if (fullText.length >= winSize * 2) {
               const lastWin = fullText.slice(-winSize)
@@ -131,6 +131,34 @@ async function* openAIStreamToAnthropicStream(
               if (idx === -1) break
             }
             if (idx > 0) fullText = fullText.slice(0, idx)
+            loopDetected = true
+          }
+        }
+
+        // Strategy 4: count narrated JSON tool calls in text — catches models
+        // that output {"tool": "...", "arguments": {...}} as plain text repeatedly
+        // without ever executing them. 4+ is almost certainly a loop.
+        if (!loopDetected && fullText.length % 200 < 50) {
+          const jsonToolCount = (fullText.match(/\{"tool":\s*"/g) || []).length
+          if (jsonToolCount > 3) {
+            if (debugStream) logForDebugging(`[STREAM LOOP] Strategy 4: ${jsonToolCount} narrated JSON tool_call patterns detected`)
+            // Keep text up to the 2nd JSON tool call (first might be legitimate)
+            let idx = -1
+            for (let i = 0; i < 2; i++) {
+              idx = fullText.indexOf('{"tool":', idx + 1)
+              if (idx === -1) break
+            }
+            if (idx > 0) fullText = fullText.slice(0, idx)
+            loopDetected = true
+          }
+        }
+
+        // Strategy 5: indecision loop — model keeps saying "Actually, I'll"
+        // or "Wait, I" without making progress. 8+ is a clear spiral.
+        if (!loopDetected && fullText.length > 500 && fullText.length % 300 < 50) {
+          const indecisionCount = (fullText.match(/\b(Actually,? I'll|Wait,? I('ll| should| need| will)|Actually,? I should|Actually,? let me)\b/gi) || []).length
+          if (indecisionCount > 7) {
+            if (debugStream) logForDebugging(`[STREAM LOOP] Strategy 5: ${indecisionCount} indecision phrases detected`)
             loopDetected = true
           }
         }
@@ -298,6 +326,21 @@ export function createOpenAICompatibleClient(config: OpenAIClientConfig) {
               ...(system ? [translateSystemPrompt(system, { stripSafetyLayer: isLocalModel })] : []),
               ...translateAnthropicToOpenAI(messages as any),
             ]
+
+            // --- Local model: strip system-reminder noise ---
+            // Skills/superpowers prompts, deferred tool listings, and other
+            // system-reminders overwhelm local models with instructions they
+            // can't follow (causing indecision loops). Strip them entirely.
+            if (isLocalModel) {
+              for (const msg of openAIMessages) {
+                if (typeof (msg as any).content === 'string') {
+                  // Remove <system-reminder>...</system-reminder> blocks
+                  ;(msg as any).content = ((msg as any).content as string)
+                    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
+                    .trim()
+                }
+              }
+            }
 
             // --- Capability enforcement: strip unsupported content ---
 

@@ -658,40 +658,11 @@ async function* queryLoop(
         doesMostRecentAssistantMessageExceed200k(messagesForQuery),
     })
 
-    // Tool-assist routing: when the resolved model can't natively call tools,
-    // automatically route tool-heavy turns to a fast model that can.
-    // The user's model handles reasoning/creative turns; Haiku handles tools.
-    const TOOL_ASSIST_MODEL = 'claude-haiku-4-5'
-    // Use indexOf (first slash) to match ModelRouter.parseModelSpec behavior —
-    // models like "mlx-community/Qwen3-Coder" have slashes in the model ID itself
-    const modelIdForCaps = currentModel.includes('/')
-      ? currentModel.slice(currentModel.indexOf('/') + 1)
-      : currentModel
-    const currentCaps = getModelCapabilities(modelIdForCaps)
-    if (!currentCaps.supportsTools) {
-      const taskType = classifyTask({
-        activeTools: lastToolNames,
-        messageTokenCount: messagesForQuery.length * 500,
-        isPlanMode: permissionMode === 'plan',
-        isSubagent: !!toolUseContext.agentId,
-        userModelOverride: undefined,
-        bashCommand: lastBashCommand,
-        userPrompt: lastUserPrompt,
-      })
-
-      // Route to Haiku for tool-heavy task types, subagents, and after loop recovery
-      const isToolHeavyTask = ['file_search', 'simple_edit', 'test_execution', 'subagent'].includes(taskType)
-      const isToolContinuation = lastToolNames.length > 0
-      const isPostLoopRecovery = loopRecoveryCount > 0
-
-      if (isToolHeavyTask || isToolContinuation || isPostLoopRecovery) {
-        logForDebugging(
-          `[ToolAssist] ${currentModel} can't natively call tools → routing to ${TOOL_ASSIST_MODEL} ` +
-          `(task=${taskType}, toolCont=${isToolContinuation}, loopRecovery=${isPostLoopRecovery})`,
-        )
-        currentModel = TOOL_ASSIST_MODEL
-      }
-    }
+    // Tool-assist routing DISABLED: local models use text-based tool calling
+    // via parseToolCallsFromText() in the OpenAI adapter. The model narrates
+    // tool calls as JSON in its text output, which gets parsed and executed.
+    // Previously this swapped the model entirely to Haiku, but that prevented
+    // the local model from ever seeing the prompt.
 
     queryCheckpoint('query_setup_end')
 

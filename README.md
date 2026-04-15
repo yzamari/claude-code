@@ -101,6 +101,16 @@ chmod +x install.sh
 ./run.sh heretic
 ```
 
+### Connection Modes
+
+- **Simulator Mode**: Set `USE_SIMULATOR=True` in your `.env` file to use the `MockBroker` for local testing.
+- **MetaApi Mode**: Set `USE_SIMULATOR=False` in your `.env` file. This will trigger the connection to MetaApi using your `METAAPI_TOKEN`.
+
+### Connection Modes
+
+- **Simulator Mode**: Set `USE_SIMULATOR=True` in your `.env` file to use the `MockBroker` for local testing.
+- **MetaApi Mode**: Set `USE_SIMULATOR=False` in your `.env` file. This will trigger the connection to MetaApi using your `METAAPI_TOKEN`.
+
 ### Available Models
 
 | Command | Model | Cloud/Local | Notes |

@@ -68,6 +68,11 @@ export class ModelRouter {
       return this.resolveModelSpec(context.userModelOverride, taskType, fallbackChain)
     }
 
+    // Tool follow-up: use cheapModel if configured and no explicit route
+    if (taskType === 'tool_followup' && this.config.cheapModel && !this.routeMap.has(taskType)) {
+      return this.resolveModelSpec(this.config.cheapModel, taskType, fallbackChain)
+    }
+
     // Look up route for this task type
     const modelSpec = this.routeMap.get(taskType)
     if (!modelSpec) {

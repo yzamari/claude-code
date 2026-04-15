@@ -21,6 +21,7 @@ export function resolveModelForQuery(
     userModelOverride: string | undefined
     lastBashCommand?: string
     userPrompt?: string
+    isToolFollowup?: boolean
   }
 ): ResolvedModelRoute {
   if (!routerConfig?.enabled) return { model: null, fallbackChain: [] }
@@ -40,6 +41,7 @@ export function resolveModelForQuery(
     userModelOverride: context.userModelOverride,
     bashCommand: context.lastBashCommand,
     userPrompt: context.userPrompt,
+    isToolFollowup: context.isToolFollowup,
   }
 
   const route = cachedRouter.resolve(taskContext)

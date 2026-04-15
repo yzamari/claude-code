@@ -37,8 +37,8 @@ export const TIME_BASED_MC_CLEARED_MESSAGE = '[Old tool result content cleared]'
 
 const IMAGE_MAX_TOKEN_SIZE = 2000
 
-// Only compact these tools
-const COMPACTABLE_TOOLS = new Set<string>([
+// Built-in tools that are always compactable
+const COMPACTABLE_BUILTIN_TOOLS = new Set<string>([
   FILE_READ_TOOL_NAME,
   ...SHELL_TOOL_NAMES,
   GREP_TOOL_NAME,
@@ -48,6 +48,10 @@ const COMPACTABLE_TOOLS = new Set<string>([
   FILE_EDIT_TOOL_NAME,
   FILE_WRITE_TOOL_NAME,
 ])
+
+// Mutable set: starts with built-ins. MCP tools are matched by prefix
+// in isCompactableTool() so they don't need explicit registration.
+const COMPACTABLE_TOOLS = new Set<string>(COMPACTABLE_BUILTIN_TOOLS)
 
 // --- Cached microcompact state (ant-only, gated by feature('CACHED_MICROCOMPACT')) ---
 
@@ -219,9 +223,14 @@ export type MicrocompactResult = {
   }
 }
 
+/** Check if a tool name is compactable (built-in set OR any MCP tool). */
+function isCompactableTool(name: string): boolean {
+  return COMPACTABLE_TOOLS.has(name) || name.startsWith('mcp__')
+}
+
 /**
- * Walk messages and collect tool_use IDs whose tool name is in
- * COMPACTABLE_TOOLS, in encounter order. Shared by both microcompact paths.
+ * Walk messages and collect tool_use IDs whose tool name is compactable,
+ * in encounter order. Shared by both microcompact paths.
  */
 function collectCompactableToolIds(messages: Message[]): string[] {
   const ids: string[] = []
@@ -231,7 +240,7 @@ function collectCompactableToolIds(messages: Message[]): string[] {
       Array.isArray(message.message.content)
     ) {
       for (const block of message.message.content) {
-        if (block.type === 'tool_use' && COMPACTABLE_TOOLS.has(block.name)) {
+        if (block.type === 'tool_use' && isCompactableTool(block.name)) {
           ids.push(block.id)
         }
       }

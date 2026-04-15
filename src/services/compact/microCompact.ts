@@ -294,10 +294,16 @@ export async function microcompactMessages(
     }
   }
 
-  // Legacy microcompact path removed — tengu_cache_plum_violet is always true.
-  // For contexts where cached microcompact is not available (external builds,
-  // non-ant users, unsupported models, sub-agents), no compaction happens here;
-  // autocompact handles context pressure instead.
+  // Count-based fallback: runs when neither time-based nor cached MC fired.
+  // Public fork / unsupported models / sub-agents all hit this path. Clears
+  // older compactable tool_results to a stub once the compactable count
+  // exceeds the threshold, keeping the N most recent in full so the current
+  // turn still sees what it needs.
+  const countBasedResult = maybeCountBasedMicrocompact(messages, querySource)
+  if (countBasedResult) {
+    return countBasedResult
+  }
+
   return { messages }
 }
 
@@ -531,6 +537,133 @@ function maybeTimeBasedMicrocompact(
   // symbol to the import was flagged by the circular-deps check.
   // Pass the actual querySource: getTrackingKey returns the full source string
   // (e.g. 'repl_main_thread:outputStyle:custom'), not just the prefix.
+  if (feature('PROMPT_CACHE_BREAK_DETECTION') && querySource) {
+    notifyCacheDeletion(querySource)
+  }
+
+  return { messages: result }
+}
+
+// --- Count-based microcompact ---
+//
+// Time-based MC only fires on long idle gaps; cached MC is ant-only. On
+// external builds and during active work, old FileRead / Bash / Grep / MCP
+// tool_results otherwise accumulate until autocompact fires at the ~75–90%
+// threshold. Count-based MC clears older compactable tool_results to the
+// same cleared-marker stub as time-based MC once the number of compactable
+// tool calls in the conversation exceeds a threshold.
+//
+// Runs AFTER cached MC in microcompactMessages so ant users on supported
+// models keep using cache-editing (which is cheaper because it doesn't
+// invalidate the server-side prompt cache). This only fires as a fallback
+// for builds/paths where cached MC declined to run.
+
+export type CountBasedMCConfig = {
+  enabled: boolean
+  /** Fires clearing once compactableIds.length > triggerCount. */
+  triggerCount: number
+  /** Keep this many most-recent compactable tool results in full. */
+  keepRecent: number
+}
+
+const COUNT_BASED_MC_CONFIG_DEFAULTS: CountBasedMCConfig = {
+  enabled: true,
+  triggerCount: 10,
+  keepRecent: 5,
+}
+
+/**
+ * Env-var overrides (`CLAUDE_CODE_MC_TRIGGER_COUNT`, `CLAUDE_CODE_MC_KEEP_RECENT`,
+ * `CLAUDE_CODE_MC_DISABLE`) let operators tune the public-fork fallback without
+ * touching code. Invalid values fall through to the defaults — never 0 / NaN.
+ */
+function getCountBasedMCConfig(): CountBasedMCConfig {
+  const base = COUNT_BASED_MC_CONFIG_DEFAULTS
+  const disabled = process.env.CLAUDE_CODE_MC_DISABLE
+  if (disabled && disabled !== '0' && disabled.toLowerCase() !== 'false') {
+    return { ...base, enabled: false }
+  }
+  const rawTrigger = parseInt(process.env.CLAUDE_CODE_MC_TRIGGER_COUNT ?? '', 10)
+  const rawKeep = parseInt(process.env.CLAUDE_CODE_MC_KEEP_RECENT ?? '', 10)
+  return {
+    ...base,
+    triggerCount:
+      Number.isFinite(rawTrigger) && rawTrigger > 0 ? rawTrigger : base.triggerCount,
+    keepRecent:
+      Number.isFinite(rawKeep) && rawKeep > 0 ? rawKeep : base.keepRecent,
+  }
+}
+
+export function maybeCountBasedMicrocompact(
+  messages: Message[],
+  querySource?: QuerySource,
+): MicrocompactResult | null {
+  const config = getCountBasedMCConfig()
+  if (!config.enabled) return null
+
+  const compactableIds = collectCompactableToolIds(messages)
+  if (compactableIds.length <= config.triggerCount) return null
+
+  // Floor at 1: mirrors time-based MC rationale — slice(-0) returns the full
+  // array (keeps everything), and clearing ALL results leaves zero working
+  // context for the current turn.
+  const keepRecent = Math.max(1, config.keepRecent)
+  const keepSet = new Set(compactableIds.slice(-keepRecent))
+  const clearSet = new Set(compactableIds.filter(id => !keepSet.has(id)))
+
+  if (clearSet.size === 0) return null
+
+  let tokensSaved = 0
+  const result: Message[] = messages.map(message => {
+    if (message.type !== 'user' || !Array.isArray(message.message.content)) {
+      return message
+    }
+    let touched = false
+    const newContent = message.message.content.map(block => {
+      if (
+        block.type === 'tool_result' &&
+        clearSet.has(block.tool_use_id) &&
+        block.content !== TIME_BASED_MC_CLEARED_MESSAGE
+      ) {
+        tokensSaved += calculateToolResultTokens(block)
+        touched = true
+        return { ...block, content: TIME_BASED_MC_CLEARED_MESSAGE }
+      }
+      return block
+    })
+    if (!touched) return message
+    return {
+      ...message,
+      message: { ...message.message, content: newContent },
+    }
+  })
+
+  // Idempotent re-runs: when the count threshold is still exceeded but all
+  // the eligible blocks were already stubbed on a previous turn, we produce
+  // zero new savings and skip the state reset / cache-break bookkeeping.
+  if (tokensSaved === 0) {
+    return null
+  }
+
+  logEvent('tengu_count_based_microcompact', {
+    compactableCount: compactableIds.length,
+    triggerCount: config.triggerCount,
+    toolsCleared: clearSet.size,
+    toolsKept: keepSet.size,
+    keepRecent: config.keepRecent,
+    tokensSaved,
+  })
+
+  logForDebugging(
+    `[COUNT-BASED MC] ${compactableIds.length} compactable tools (> ${config.triggerCount}), cleared ${clearSet.size} tool results (~${tokensSaved} tokens), kept last ${keepSet.size}`,
+  )
+
+  suppressCompactWarning()
+
+  // Same cache-bookkeeping as time-based: we just invalidated the server
+  // cache by changing prompt content. Reset cached-MC's stale IDs and
+  // notify the break detector to suppress the impending legitimate drop.
+  resetMicrocompactState()
   if (feature('PROMPT_CACHE_BREAK_DETECTION') && querySource) {
     notifyCacheDeletion(querySource)
   }

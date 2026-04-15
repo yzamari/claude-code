@@ -12,8 +12,11 @@
 #
 # All arguments after the model alias are forwarded to claude-code.
 
-# If first arg starts with -- it's a flag, not a model alias
-if [ -z "$1" ] || [[ "$1" == --* ]]; then
+# If first arg starts with `--`, or is a single-dash flag other than `-p`
+# (which run.sh handles specially below to capture its prompt payload), treat
+# it as a flag meant for claude-code and run under smart routing. Otherwise
+# the first arg is a model alias.
+if [ -z "$1" ] || [[ "$1" == --* ]] || { [[ "$1" == -* ]] && [ "$1" != "-p" ]; }; then
   MODEL_ALIAS="smart"
   EXTRA_ARGS=("$@")
 else

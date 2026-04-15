@@ -185,6 +185,11 @@ type State = {
       agentId: string | null
     }
   >
+  // Cumulative bytes of relevant-memory attachments surfaced this session.
+  // Persists across compaction: the compact summary usually captures memory
+  // content, so re-injecting the same files post-compact is pure waste. Reset
+  // only on switchSession() / regenerateSessionId().
+  surfacedMemoryBytes: number
   // Track slow operations for dev bar display (ant-only)
   slowOperations: Array<{
     operation: string
@@ -384,6 +389,8 @@ function getInitialState(): State {
     teleportedSessionInfo: null,
     // Track invoked skills for preservation across compaction
     invokedSkills: new Map(),
+    // Cumulative surfaced-memory bytes — survives compaction (see State type).
+    surfacedMemoryBytes: 0,
     // Track slow operations for dev bar display
     slowOperations: [],
     // SDK-provided betas
@@ -452,6 +459,8 @@ export function regenerateSessionId(
   // null so getTranscriptPath() derives from originalCwd.
   STATE.sessionId = randomUUID() as SessionId
   STATE.sessionProjectDir = null
+  // New session → fresh surfaced-memory budget.
+  STATE.surfacedMemoryBytes = 0
   return STATE.sessionId
 }
 
@@ -481,6 +490,8 @@ export function switchSession(
   STATE.planSlugCache.delete(STATE.sessionId)
   STATE.sessionId = sessionId
   STATE.sessionProjectDir = projectDir
+  // Switching to another session swaps the relevant-memory accounting too.
+  STATE.surfacedMemoryBytes = 0
   sessionSwitched.emit(sessionId)
 }
 
@@ -784,6 +795,25 @@ export function consumePostCompaction(): boolean {
   const was = STATE.pendingPostCompaction
   STATE.pendingPostCompaction = false
   return was
+}
+
+/**
+ * Cumulative bytes of relevant-memory attachments surfaced this session.
+ * Persists across compaction (unlike the message-scan counter the selector
+ * used previously) so the selector's 60KB session cap isn't silently reset
+ * by every /compact. Reset only on session switch / session regenerate.
+ */
+export function getSurfacedMemoryBytes(): number {
+  return STATE.surfacedMemoryBytes
+}
+
+export function addSurfacedMemoryBytes(bytes: number): void {
+  if (!Number.isFinite(bytes) || bytes <= 0) return
+  STATE.surfacedMemoryBytes += bytes
+}
+
+export function resetSurfacedMemoryBytes(): void {
+  STATE.surfacedMemoryBytes = 0
 }
 
 export function getLastInteractionTime(): number {

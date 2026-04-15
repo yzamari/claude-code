@@ -19,6 +19,7 @@ import {
   FILE_READ_TOOL_NAME,
   FILE_UNCHANGED_STUB,
 } from '../../tools/FileReadTool/prompt.js'
+import { SKILL_TOOL_NAME } from '../../tools/SkillTool/constants.js'
 import { ToolSearchTool } from '../../tools/ToolSearchTool/ToolSearchTool.js'
 import type { AgentId } from '../../types/ids.js'
 import type {
@@ -119,15 +120,23 @@ import {
   getPartialCompactPrompt,
 } from './prompt.js'
 
-export const POST_COMPACT_MAX_FILES_TO_RESTORE = 5
-export const POST_COMPACT_TOKEN_BUDGET = 50_000
-export const POST_COMPACT_MAX_TOKENS_PER_FILE = 5_000
+// Post-compact re-injection budgets — shrunk from the upstream defaults
+// (5 files / 50K / 5K / 25K / 5K) as part of the token-waste audit.
+// Rationale: even after compaction frees space, the re-injection path would
+// claim up to 75K tokens back on the next turn, partially negating the work.
+// The new caps sit at roughly 40 % of the original budget and pair with the
+// skill-dedup + count-based microcompact fixes to keep post-compact context
+// lean. Tune via these constants if real-world runs show the model losing
+// too much context after a compact.
+export const POST_COMPACT_MAX_FILES_TO_RESTORE = 3
+export const POST_COMPACT_TOKEN_BUDGET = 20_000
+export const POST_COMPACT_MAX_TOKENS_PER_FILE = 3_000
 // Skills can be large (verify=18.7KB, claude-api=20.1KB). Previously re-injected
 // unbounded on every compact → 5-10K tok/compact. Per-skill truncation beats
 // dropping — instructions at the top of a skill file are usually the critical
-// part. Budget sized to hold ~5 skills at the per-skill cap.
-export const POST_COMPACT_MAX_TOKENS_PER_SKILL = 5_000
-export const POST_COMPACT_SKILLS_TOKEN_BUDGET = 25_000
+// part. Budget sized to hold ~4 skills at the per-skill cap.
+export const POST_COMPACT_MAX_TOKENS_PER_SKILL = 3_000
+export const POST_COMPACT_SKILLS_TOKEN_BUDGET = 12_000
 const MAX_COMPACT_STREAMING_RETRIES = 2
 
 /**
@@ -554,8 +563,10 @@ export async function compactConversation(
       postCompactFileAttachments.push(planModeAttachment)
     }
 
-    // Add skill attachment if skills were invoked in this session
-    const skillAttachment = createSkillAttachmentIfNeeded(context.agentId)
+    // Add skill attachment if skills were invoked in this session. Full
+    // compactConversation has no preserved tail, so pass [] — the dedup is a
+    // no-op here and exists for symmetry with the partial-compact call site.
+    const skillAttachment = createSkillAttachmentIfNeeded(context.agentId, [])
     if (skillAttachment) {
       postCompactFileAttachments.push(skillAttachment)
     }
@@ -947,7 +958,12 @@ export async function partialCompactConversation(
       postCompactFileAttachments.push(planModeAttachment)
     }
 
-    const skillAttachment = createSkillAttachmentIfNeeded(context.agentId)
+    // Pass messagesToKeep so skills whose Skill tool_use is in the preserved
+    // tail are skipped — their SKILL.md content is still visible to the model.
+    const skillAttachment = createSkillAttachmentIfNeeded(
+      context.agentId,
+      messagesToKeep,
+    )
     if (skillAttachment) {
       postCompactFileAttachments.push(skillAttachment)
     }
@@ -1486,13 +1502,68 @@ export function createPlanAttachmentIfNeeded(
 }
 
 /**
+ * Normalize a skill name the way SkillTool.checkPermissions does: trim
+ * whitespace and strip a leading slash. Keeps dedup stable whether the model
+ * emitted `"/pdf"` or `"pdf"` in its tool input.
+ */
+function normalizeSkillName(name: string): string {
+  const trimmed = name.trim()
+  return trimmed.startsWith('/') ? trimmed.slice(1) : trimmed
+}
+
+/**
+ * Scan messages for Skill tool_use blocks and collect the invoked skill names
+ * (normalized). Used to dedup post-compact invoked_skills attachments against
+ * skills that were invoked in the preserved tail — their SKILL.md content is
+ * already visible to the model, so re-injecting it is pure waste (~3–5K tok/
+ * skill depending on the skill).
+ *
+ * Mirrors collectReadToolFilePaths and the diff-against-preserved pattern
+ * used by getDeferredToolsDeltaAttachment / createPostCompactFileAttachments.
+ */
+function collectSkillNamesFromMessages(messages: Message[]): Set<string> {
+  const names = new Set<string>()
+  for (const message of messages) {
+    if (
+      message.type !== 'assistant' ||
+      !Array.isArray(message.message.content)
+    ) {
+      continue
+    }
+    for (const block of message.message.content) {
+      if (block.type !== 'tool_use' || block.name !== SKILL_TOOL_NAME) {
+        continue
+      }
+      const input = block.input
+      if (
+        input &&
+        typeof input === 'object' &&
+        'skill' in input &&
+        typeof input.skill === 'string'
+      ) {
+        names.add(normalizeSkillName(input.skill))
+      }
+    }
+  }
+  return names
+}
+
+/**
  * Creates an attachment for invoked skills to preserve their content across compaction.
  * Only includes skills scoped to the given agent (or main session when agentId is null/undefined).
  * This ensures skill guidelines remain available after the conversation is summarized
  * without leaking skills from other agent contexts.
+ *
+ * `preservedMessages` is the tail of the conversation that survives compaction
+ * (partial/session-memory compact). Skills whose Skill tool_use appears in that
+ * tail are skipped — their SKILL.md content is still visible to the model via
+ * the preserved invocation, so re-injecting them here is pure waste (up to
+ * POST_COMPACT_MAX_TOKENS_PER_SKILL per duplicated skill). Full compact has no
+ * preserved tail and passes `[]`, making this a no-op for that path.
  */
 export function createSkillAttachmentIfNeeded(
   agentId?: string,
+  preservedMessages: Message[] = [],
 ): AttachmentMessage | null {
   const invokedSkills = getInvokedSkillsForAgent(agentId)
 
@@ -1500,11 +1571,16 @@ export function createSkillAttachmentIfNeeded(
     return null
   }
 
+  const preservedSkillNames = collectSkillNamesFromMessages(preservedMessages)
+
   // Sorted most-recent-first so budget pressure drops the least-relevant skills.
   // Per-skill truncation keeps the head of each file (where setup/usage
   // instructions typically live) rather than dropping whole skills.
   let usedTokens = 0
   const skills = Array.from(invokedSkills.values())
+    .filter(
+      skill => !preservedSkillNames.has(normalizeSkillName(skill.skillName)),
+    )
     .sort((a, b) => b.invokedAt - a.invokedAt)
     .map(skill => ({
       name: skill.skillName,

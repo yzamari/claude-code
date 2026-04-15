@@ -86,6 +86,8 @@ export interface AssistantMessage {
   agentId?: string
   /** Caller info for debugging/display. */
   caller?: string
+  /** Internal-only research metadata forwarded from message_start/message_delta. */
+  research?: unknown
 }
 
 // ============================================================================

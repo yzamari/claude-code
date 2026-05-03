@@ -376,6 +376,43 @@ describe('filterInvalidHooks settings isolation', () => {
 // ----------------------------------------------------------------------
 // 9. CLAUDE_CODE_SIMPLE is honoured by the prompt path
 // ----------------------------------------------------------------------
+// ----------------------------------------------------------------------
+// 10. /dream and /babysit-prs slash commands registered
+// ----------------------------------------------------------------------
+describe('new slash commands', () => {
+  it('/dream is exported and shaped as a prompt command', async () => {
+    const { default: dream } = await import(
+      '../../src/commands/dream/index.js'
+    )
+    expect(dream.type).toBe('prompt')
+    expect(dream.name).toBe('dream')
+    expect(typeof dream.getPromptForCommand).toBe('function')
+  })
+
+  it('/dream returns a non-empty consolidation prompt', async () => {
+    const { default: dream } = await import(
+      '../../src/commands/dream/index.js'
+    )
+    const blocks = await dream.getPromptForCommand('', {} as never)
+    expect(blocks.length).toBeGreaterThan(0)
+    expect(blocks[0]?.type).toBe('text')
+    const text = (blocks[0] as { text: string }).text
+    expect(text).toMatch(/Dream|consolidat/i)
+    expect(text.length).toBeGreaterThan(100)
+  })
+
+  it('/babysit-prs is exported with the expected shape', async () => {
+    const { default: babysit } = await import(
+      '../../src/commands/babysit-prs/index.js'
+    )
+    expect(babysit.type).toBe('prompt')
+    expect(babysit.name).toBe('babysit-prs')
+    const blocks = await babysit.getPromptForCommand('', {} as never)
+    expect(blocks.length).toBe(1)
+    expect((blocks[0] as { text: string }).text).toMatch(/PR|gh pr/i)
+  })
+})
+
 describe('CLAUDE_CODE_SIMPLE slim-prompt opt-in', () => {
   it('--bare sets CLAUDE_CODE_SIMPLE=1 (verified via env mention in --help)', () => {
     // Source-level confirmation that the env var is consumed in the right

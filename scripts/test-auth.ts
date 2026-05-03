@@ -11,7 +11,7 @@ const client = new Anthropic({
 async function main() {
   try {
     const msg = await client.messages.create({
-      model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
+      model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
       max_tokens: 50,
       messages: [{ role: 'user', content: 'Say "hello" and nothing else.' }],
     })

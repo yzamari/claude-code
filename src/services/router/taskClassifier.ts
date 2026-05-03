@@ -8,6 +8,17 @@ export interface TaskContext {
   userModelOverride: string | undefined
   bashCommand?: string
   userPrompt?: string
+  /** True when the previous turn produced tool results (follow-up processing turn). */
+  isToolFollowup?: boolean
+  /**
+   * Resolved /effort slider level. Lets the router push cheap turns onto
+   * `cheapModel` when the user explicitly dialled effort down ('low'), or
+   * force the default (full-fat) model on every turn when they dialled it
+   * up ('xhigh' / 'max'). Honoured by ModelRouter.resolve() — see it for the
+   * exact precedence (user_override > effort=max/xhigh > effort=low cheap
+   * preference > per-task routes > default).
+   */
+  effortHint?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 }
 
 const SEARCH_TOOLS = new Set(['Grep', 'Glob'])
@@ -54,6 +65,13 @@ export function classifyTask(context: TaskContext): TaskType {
   // Edit tools
   if (context.activeTools.some(t => EDIT_TOOLS.has(t))) {
     return 'simple_edit'
+  }
+
+  // Tool follow-up: previous turn produced tool results that just need
+  // reading/comprehension, not complex reasoning. A cheaper model can
+  // process tool output and decide the next action.
+  if (context.isToolFollowup && context.activeTools.length > 0) {
+    return 'tool_followup'
   }
 
   // Large context (message history exceeds threshold)

@@ -95,6 +95,7 @@ import type { QuerySource } from './constants/querySource.js'
 import { createDumpPromptsFetch } from './services/api/dumpPrompts.js'
 import { StreamingToolExecutor } from './services/tools/StreamingToolExecutor.js'
 import { resolveModelForQuery } from './services/router/resolveRouteForQuery.js'
+import { convertEffortValueToLevel } from './utils/effort.js'
 import { getModelCapabilities } from './services/router/capabilities.js'
 import { classifyTask } from './services/router/taskClassifier.js'
 import { queryCheckpoint } from './utils/queryProfiler.js'
@@ -636,6 +637,20 @@ async function* queryLoop(
       return undefined
     })()
 
+    // Detect tool follow-up turns: if the previous assistant message used
+    // tools, this is a follow-up turn that just processes results. A cheaper
+    // model can handle reading tool output and deciding the next action.
+    const isToolFollowup = lastToolNames.length > 0 && turnCount > 0
+
+    // Pass /effort slider value into the router so xhigh/max can force the
+    // default model and low can prefer cheapModel (see ModelRouter.resolve).
+    // appState.effortValue may be undefined (no slider set), a string level,
+    // or a numeric (ant-internal). convertEffortValueToLevel normalises it.
+    const effortHintForRouter =
+      appState.effortValue !== undefined
+        ? convertEffortValueToLevel(appState.effortValue)
+        : undefined
+
     const routeResult = isUserOverride
       ? { model: null, fallbackChain: [] } // User chose a specific model — skip routing entirely
       : resolveModelForQuery(routerSettings, {
@@ -646,6 +661,8 @@ async function* queryLoop(
           userModelOverride: undefined,
           lastBashCommand,
           userPrompt: lastUserPrompt,
+          isToolFollowup,
+          effortHint: effortHintForRouter,
         })
     const routedModel = routeResult.model
     const routerFallbackChain = routeResult.fallbackChain
@@ -657,12 +674,6 @@ async function* queryLoop(
         permissionMode === 'plan' &&
         doesMostRecentAssistantMessageExceed200k(messagesForQuery),
     })
-
-    // Tool-assist routing DISABLED: local models use text-based tool calling
-    // via parseToolCallsFromText() in the OpenAI adapter. The model narrates
-    // tool calls as JSON in its text output, which gets parsed and executed.
-    // Previously this swapped the model entirely to Haiku, but that prevented
-    // the local model from ever seeing the prompt.
 
     queryCheckpoint('query_setup_end')
 

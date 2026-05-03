@@ -46,6 +46,7 @@ import {
 } from './settingsCache.js'
 import { type SettingsJson, SettingsSchema } from './types.js'
 import {
+  filterInvalidHooks,
   filterInvalidPermissionRules,
   formatZodError,
   type SettingsWithErrors,
@@ -215,15 +216,22 @@ function parseSettingsFileUncached(path: string): {
     // Filter invalid permission rules before schema validation so one bad
     // rule doesn't cause the entire settings file to be rejected.
     const ruleWarnings = filterInvalidPermissionRules(data, path)
+    // Same idea for hooks (upstream v2.1.118): one malformed hook entry
+    // (missing `command`, unknown `type`, etc.) used to reject the whole
+    // settings.json. Now we strip just the bad ones.
+    const hookWarnings = filterInvalidHooks(data, path)
 
     const result = SettingsSchema().safeParse(data)
 
     if (!result.success) {
       const errors = formatZodError(result.error, path)
-      return { settings: null, errors: [...ruleWarnings, ...errors] }
+      return {
+        settings: null,
+        errors: [...ruleWarnings, ...hookWarnings, ...errors],
+      }
     }
 
-    return { settings: result.data, errors: ruleWarnings }
+    return { settings: result.data, errors: [...ruleWarnings, ...hookWarnings] }
   } catch (error) {
     handleFileSystemError(error, path)
     return { settings: null, errors: [] }

@@ -29,6 +29,12 @@ export const AFK_MODE_BETA_HEADER = feature('TRANSCRIPT_CLASSIFIER')
 export const CLI_INTERNAL_BETA_HEADER =
   process.env.USER_TYPE === 'ant' ? 'cli-internal-2026-02-09' : ''
 export const ADVISOR_BETA_HEADER = 'advisor-tool-2026-03-01'
+// Gated behind CACHED_MICROCOMPACT feature flag. Empty when off so the header
+// doesn't show up in real requests; present as a string so dynamic imports in
+// claude.ts compile against a real export.
+export const CACHE_EDITING_BETA_HEADER = feature('CACHED_MICROCOMPACT')
+  ? 'cache-editing-2026-02-19'
+  : ''
 
 /**
  * Bedrock only supports a limited number of beta headers and only through

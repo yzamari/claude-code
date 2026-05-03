@@ -646,6 +646,12 @@ export const SettingsSchema = lazySchema(() =>
         .string()
         .optional()
         .describe('Controls the output style for assistant responses'),
+      prUrlTemplate: z
+        .string()
+        .optional()
+        .describe(
+          'Override the URL the PR-review badge links to. Supports placeholders {owner}, {repo}, {pr}. Forward-compat for upstream v2.1.119 parity; consumed when the fork gains a PR-badge surface.',
+        ),
       language: z
         .string()
         .optional()

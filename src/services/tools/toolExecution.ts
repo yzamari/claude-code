@@ -1491,7 +1491,11 @@ async function checkPermissionsAndCallTool(
       mcpServerType,
       mcpServerBaseUrl,
     )) {
-      if ('updatedMCPToolOutput' in hookResult) {
+      if ('updatedToolOutput' in hookResult) {
+        // Upstream v2.1.121 — works for ANY tool. Wins over the legacy
+        // updatedMCPToolOutput when both are set on the same yield.
+        toolOutput = (hookResult as { updatedToolOutput: unknown }).updatedToolOutput
+      } else if ('updatedMCPToolOutput' in hookResult) {
         if (isMcpTool(tool)) {
           toolOutput = hookResult.updatedMCPToolOutput
         }

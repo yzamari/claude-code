@@ -5,6 +5,7 @@ export const TASK_TYPES = [
   'file_search',
   'simple_edit',
   'test_execution',
+  'tool_followup',
   'subagent',
   'planning',
   'large_context',
@@ -51,6 +52,11 @@ export const RouterConfigSchema = lazySchema(() =>
   z.object({
     enabled: z.boolean().default(false),
     default: z.string(),
+    // Model used for tool follow-up turns (processing tool results, deciding
+    // next tool call). Defaults to the main model if unset. Set to a cheaper
+    // model (e.g. "claude-haiku-4-5-20251001") to save tokens on turns that
+    // only need to read tool output and pick the next action.
+    cheapModel: z.string().optional(),
     providers: z.record(z.string(), ProviderConfigSchema()).optional(),
     routes: z.array(RouteSchema()).optional(),
     fallbackChain: z.array(z.string()).optional(),

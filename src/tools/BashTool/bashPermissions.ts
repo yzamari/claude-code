@@ -223,6 +223,15 @@ const BARE_SHELL_PREFIXES = new Set([
   'sudo',
   'doas',
   'pkexec',
+  // process-control wrappers that exec their args (upstream v2.1.113 parity).
+  // `watch -n5 rm -rf /` would auto-allow with Bash(watch:*); same for
+  // `ionice rm -rf /`, `setsid rm -rf /`, `taskset 0x1 rm -rf /`,
+  // `chrt -f 1 rm -rf /`. Must never be suggested as prefix rules.
+  'watch',
+  'ionice',
+  'setsid',
+  'taskset',
+  'chrt',
 ])
 
 /**

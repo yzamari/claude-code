@@ -157,6 +157,8 @@ import {
   getLastEmittedDate,
   setLastEmittedDate,
   getKairosActive,
+  getSurfacedMemoryBytes,
+  addSurfacedMemoryBytes,
 } from '../bootstrap/state.js'
 import type { QuerySource } from '../constants/querySource.js'
 import {
@@ -2381,8 +2383,22 @@ export function startRelevantMemoryPrefetch(
     return undefined
   }
 
+  // Two accounting sources, combined:
+  //   1. `collectSurfacedMemories(messages)` — scans the current (possibly
+  //      post-compact) messages for past relevant_memories attachments. Its
+  //      byte total resets on compact because the attachments are gone, and
+  //      its path set is used to de-dup the selector against still-visible
+  //      memories.
+  //   2. `getSurfacedMemoryBytes()` — module-level counter persisted across
+  //      compact. The compact summary almost always already captures the
+  //      memory content, so re-injecting the same files post-compact would
+  //      blow straight through the 60KB session cap on every /compact. The
+  //      persistent counter makes the cap hold session-wide.
+  // Math.max so either path's budget enforcement wins.
   const surfaced = collectSurfacedMemories(messages)
-  if (surfaced.totalBytes >= RELEVANT_MEMORIES_CONFIG.MAX_SESSION_BYTES) {
+  const persistedBytes = getSurfacedMemoryBytes()
+  const effectiveBytes = Math.max(surfaced.totalBytes, persistedBytes)
+  if (effectiveBytes >= RELEVANT_MEMORIES_CONFIG.MAX_SESSION_BYTES) {
     return undefined
   }
 
@@ -2397,12 +2413,26 @@ export function startRelevantMemoryPrefetch(
     collectRecentSuccessfulTools(messages, lastUserMessage),
     controller.signal,
     surfaced.paths,
-  ).catch(e => {
-    if (!isAbortError(e)) {
-      logError(e)
-    }
-    return []
-  })
+  )
+    .then(attachments => {
+      // Record the bytes we're about to inject so the session-wide counter
+      // stays accurate across compaction. Only count the memory text itself
+      // — match collectSurfacedMemories(), which also sums mem.content.length.
+      for (const attachment of attachments) {
+        if (attachment.type === 'relevant_memories') {
+          for (const mem of attachment.memories) {
+            addSurfacedMemoryBytes(mem.content.length)
+          }
+        }
+      }
+      return attachments
+    })
+    .catch(e => {
+      if (!isAbortError(e)) {
+        logError(e)
+      }
+      return []
+    })
 
   const handle: MemoryPrefetch = {
     promise,

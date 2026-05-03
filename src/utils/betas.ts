@@ -23,7 +23,7 @@ import {
 } from '../constants/betas.js'
 import { OAUTH_BETA_HEADER } from '../constants/oauth.js'
 import { isClaudeAISubscriber } from './auth.js'
-import { has1mContext } from './context.js'
+import { has1mContext, modelStillAcceptsContext1MBeta } from './context.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import { getCanonicalName } from './model/model.js'
 import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
@@ -251,7 +251,12 @@ export const getAllModelBetas = memoize((model: string): string[] => {
   if (isClaudeAISubscriber()) {
     betaHeaders.push(OAUTH_BETA_HEADER)
   }
-  if (has1mContext(model)) {
+  // Only send the 1M beta header to models that still accept it. As of
+  // 2026-04-30 Anthropic retired `context-1m-2025-08-07` for Sonnet 4/4.5;
+  // sending it there now is at best a no-op, at worst a 400. has1mContext
+  // checks the user's [1m] opt-in suffix; modelStillAcceptsContext1MBeta
+  // gates by model family.
+  if (has1mContext(model) && modelStillAcceptsContext1MBeta(model)) {
     betaHeaders.push(CONTEXT_1M_BETA_HEADER)
   }
   if (

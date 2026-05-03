@@ -391,6 +391,13 @@ export function getCacheControl({
  * TTLs when GrowthBook's disk cache updates mid-request.
  */
 function should1hCacheTTL(querySource?: QuerySource): boolean {
+  // Universal opt-in (matches upstream v2.1.108): any provider, any user type.
+  // Why: lets API-key / Vertex / Foundry / self-hosted users opt into 1h TTL
+  // without depending on GrowthBook (which only fires for first-party users).
+  if (isEnvTruthy(process.env.ENABLE_PROMPT_CACHING_1H)) {
+    return true
+  }
+
   // 3P Bedrock users get 1h TTL when opted in via env var — they manage their own billing
   // No GrowthBook gating needed since 3P users don't have GrowthBook configured
   if (
@@ -862,10 +869,10 @@ export async function* executeNonStreamingRequest(
       try {
         // biome-ignore lint/plugin: non-streaming API call
         return await anthropic.beta.messages.create(
-          {
+          sanitizeParamsForAnthropic({
             ...adjustedParams,
             model: normalizeModelStringForAPI(adjustedParams.model),
-          },
+          }),
           {
             signal: retryOptions.signal,
             timeout: fallbackTimeoutMs,
@@ -1607,10 +1614,10 @@ async function* queryModel(
         modelSupportsAdaptiveThinking(options.model)
       ) {
         // For models that support adaptive thinking, always use adaptive
-        // thinking without a budget.
-        thinking = {
-          type: 'adaptive',
-        } satisfies BetaMessageStreamParams['thinking']
+        // thinking without a budget. The shipped SDK's BetaThinkingConfigParam
+        // union only lists 'enabled' | 'disabled'; `adaptive` is a newer
+        // API-only variant, so cast through unknown.
+        thinking = { type: 'adaptive' } as unknown as BetaMessageStreamParams['thinking']
       } else {
         // For models that do not support adaptive thinking, use the default
         // thinking budget unless explicitly specified.
@@ -1794,7 +1801,7 @@ async function* queryModel(
         // client_creation_start is meaningful on attempt 1.
         queryCheckpoint('query_client_creation_end')
 
-        const params = paramsFromContext(context)
+        const params = sanitizeParamsForAnthropic(paramsFromContext(context))
         captureAPIRequest(params, options.querySource) // Capture for bug reports
 
         maxOutputTokens = params.max_tokens
@@ -2000,12 +2007,20 @@ async function* queryModel(
                   input: '',
                 }
                 break
-              case 'server_tool_use':
-                contentBlocks[part.index] = {
-                  ...part.content_block,
-                  input: '' as unknown as { [key: string]: unknown },
+              // @ts-expect-error: 'server_tool_use' is a newer API content
+              // block variant not yet present in the shipped SDK's
+              // BetaRawContentBlockStartEvent.content_block union.
+              case 'server_tool_use': {
+                const cb = part.content_block as unknown as {
+                  type: 'server_tool_use'
+                  id: string
+                  name: string
                 }
-                if ((part.content_block.name as string) === 'advisor') {
+                contentBlocks[part.index] = {
+                  ...cb,
+                  input: '' as unknown as { [key: string]: unknown },
+                } as unknown as (typeof contentBlocks)[number]
+                if ((cb.name as string) === 'advisor') {
                   isAdvisorInProgress = true
                   logForDebugging(`[AdvisorTool] Advisor tool called`)
                   logEvent('tengu_advisor_tool_call', {
@@ -2016,6 +2031,7 @@ async function* queryModel(
                   })
                 }
                 break
+              }
               case 'text':
                 contentBlocks[part.index] = {
                   ...part.content_block,
@@ -2087,6 +2103,9 @@ async function* queryModel(
                 case 'input_json_delta':
                   if (
                     contentBlock.type !== 'tool_use' &&
+                    // @ts-expect-error: 'server_tool_use' is a fork-only
+                    // content block type not yet in the shipped SDK union;
+                    // this branch still runs at runtime when the API emits it.
                     contentBlock.type !== 'server_tool_use'
                   ) {
                     logEvent('tengu_streaming_error', {
@@ -2239,12 +2258,19 @@ async function* queryModel(
             // replacement ({ ...lastMsg.message, usage }) would disconnect
             // the queued reference; direct mutation ensures the transcript
             // captures the final values.
-            stopReason = part.delta.stop_reason
+            // Cast back to the augmented BetaStopReason so flow analysis
+            // doesn't re-narrow to the shipped SDK's literal union (which
+            // omits newer values like 'model_context_window_exceeded').
+            stopReason = part.delta.stop_reason as BetaStopReason
 
             const lastMsg = newMessages.at(-1)
             if (lastMsg) {
               lastMsg.message.usage = usage
-              lastMsg.message.stop_reason = stopReason
+              // BetaMessage.stop_reason uses the shipped SDK's narrow union;
+              // cast through the wider BetaStopReason so newer values
+              // (e.g. 'model_context_window_exceeded') pass through.
+              lastMsg.message.stop_reason =
+                stopReason as typeof lastMsg.message.stop_reason
             }
 
             // Update cost
@@ -2620,7 +2646,7 @@ async function* queryModel(
       // and CannotRetryError means every retry failed — so grab the failed
       // request's ID from the error header instead.
       const failedRequestId =
-        (errorFromRetry.originalError as APIError).requestID ?? 'unknown'
+        (errorFromRetry.originalError as APIError).request_id ?? 'unknown'
       logForDebugging(
         'Streaming endpoint returned 404, falling back to non-streaming mode',
         { level: 'warn' },
@@ -2712,7 +2738,7 @@ async function* queryModel(
 
         const requestId =
           streamRequestId ||
-          (error instanceof APIError ? error.requestID : undefined) ||
+          (error instanceof APIError ? error.request_id : undefined) ||
           (error instanceof APIError
             ? (error.error as { request_id?: string })?.request_id
             : undefined)
@@ -2768,7 +2794,7 @@ async function* queryModel(
       // Extract requestId from stream, error header, or error body
       const requestId =
         streamRequestId ||
-        (error instanceof APIError ? error.requestID : undefined) ||
+        (error instanceof APIError ? error.request_id : undefined) ||
         (error instanceof APIError
           ? (error.error as { request_id?: string })?.request_id
           : undefined)
@@ -3352,6 +3378,44 @@ export async function queryWithModel({
 // The SDK's 21333-token cap is derived from 10min × 128k tokens/hour, but we
 // bypass it by setting a client-level timeout, so we can cap higher.
 export const MAX_NON_STREAMING_TOKENS = 64_000
+
+/**
+ * Strip provider-specific metadata (e.g. `_gemini_thought_signature`) from
+ * message content blocks before sending to Anthropic. The multi-model router
+ * (StreamTranslator) stamps these on assistant `tool_use` blocks when translating
+ * OpenAI/Gemini responses so tool round-trips preserve opaque state; Anthropic's
+ * Messages API rejects unknown content-block fields with HTTP 400, so we strip
+ * them at the call boundary. We treat any underscore-prefixed key on a content
+ * block as internal metadata — consistent with the convention used by the
+ * translator when it adds these fields.
+ */
+export function sanitizeParamsForAnthropic<
+  T extends { messages?: readonly MessageParam[] | MessageParam[] },
+>(params: T): T {
+  if (!Array.isArray(params.messages)) return params
+  let anyChanged = false
+  const newMessages = params.messages.map(msg => {
+    if (!Array.isArray(msg.content)) return msg
+    let blockChanged = false
+    const newContent = msg.content.map(block => {
+      if (!block || typeof block !== 'object') return block
+      let stripKeys: string[] | undefined
+      for (const key of Object.keys(block)) {
+        if (key.startsWith('_')) (stripKeys ??= []).push(key)
+      }
+      if (!stripKeys) return block
+      blockChanged = true
+      const clone: Record<string, unknown> = { ...(block as object) }
+      for (const key of stripKeys) delete clone[key]
+      return clone as unknown as typeof block
+    })
+    if (!blockChanged) return msg
+    anyChanged = true
+    return { ...msg, content: newContent }
+  })
+  if (!anyChanged) return params
+  return { ...params, messages: newMessages }
+}
 
 /**
  * Adjusts thinking budget when max_tokens is capped for non-streaming fallback.

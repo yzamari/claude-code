@@ -37,6 +37,7 @@ import onboarding from './commands/onboarding/index.js'
 import pr_comments from './commands/pr_comments/index.js'
 import babysitPrs from './commands/babysit-prs/index.js'
 import dream from './commands/dream/index.js'
+import recap from './commands/recap/index.js'
 import releaseNotes from './commands/release-notes/index.js'
 import rename from './commands/rename/index.js'
 import resume from './commands/resume/index.js'
@@ -299,6 +300,7 @@ const COMMANDS = memoize((): Command[] => [
   pr_comments,
   babysitPrs,
   dream,
+  recap,
   releaseNotes,
   reloadPlugins,
   rename,

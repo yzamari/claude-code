@@ -411,6 +411,40 @@ describe('new slash commands', () => {
     expect(blocks.length).toBe(1)
     expect((blocks[0] as { text: string }).text).toMatch(/PR|gh pr/i)
   })
+
+  it('/recap is exported with a session-summary prompt', async () => {
+    const { default: recap } = await import(
+      '../../src/commands/recap/index.js'
+    )
+    expect(recap.type).toBe('prompt')
+    expect(recap.name).toBe('recap')
+    const blocks = await recap.getPromptForCommand('', {} as never)
+    expect(blocks.length).toBe(1)
+    expect((blocks[0] as { text: string }).text).toMatch(/recap|summar/i)
+  })
+})
+
+// ----------------------------------------------------------------------
+// 11. prUrlTemplate setting accepted in settings.json (forward-compat)
+// ----------------------------------------------------------------------
+describe('prUrlTemplate setting', () => {
+  it('passes settings schema validation', async () => {
+    const { SettingsSchema } = await import(
+      '../../src/utils/settings/types.js'
+    )
+    const result = SettingsSchema().safeParse({
+      prUrlTemplate: 'https://reviewer.local/pr/{owner}/{repo}/{pr}',
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects non-string prUrlTemplate', async () => {
+    const { SettingsSchema } = await import(
+      '../../src/utils/settings/types.js'
+    )
+    const result = SettingsSchema().safeParse({ prUrlTemplate: 42 })
+    expect(result.success).toBe(false)
+  })
 })
 
 describe('CLAUDE_CODE_SIMPLE slim-prompt opt-in', () => {

@@ -1808,6 +1808,30 @@ export async function getMatchingHooks(
           ]),
       ).values(),
     )
+    const uniqueMcpToolHooks = Array.from(
+      new Map(
+        matchedHooks
+          .filter(m => m.hook.type === 'mcp_tool')
+          .map(m => {
+            const h = m.hook as {
+              server: string
+              tool: string
+              input?: Record<string, unknown>
+              if?: string
+            }
+            // Identity is server+tool+input+if. Different `input` objects
+            // call different things, so they must NOT collapse.
+            const inputKey = JSON.stringify(h.input ?? {})
+            return [
+              hookDedupKey(
+                m,
+                `${h.server}.${h.tool}\0${inputKey}\0${getIfCondition(h)}`,
+              ),
+              m,
+            ]
+          }),
+      ).values(),
+    )
     const callbackHooks = matchedHooks.filter(m => m.hook.type === 'callback')
     // Function hooks don't need deduplication - each callback is unique
     const functionHooks = matchedHooks.filter(m => m.hook.type === 'function')
@@ -1816,6 +1840,7 @@ export async function getMatchingHooks(
       ...uniquePromptHooks,
       ...uniqueAgentHooks,
       ...uniqueHttpHooks,
+      ...uniqueMcpToolHooks,
       ...callbackHooks,
       ...functionHooks,
     ]
@@ -1828,7 +1853,8 @@ export async function getMatchingHooks(
         (h.hook.type === 'command' ||
           h.hook.type === 'prompt' ||
           h.hook.type === 'agent' ||
-          h.hook.type === 'http') &&
+          h.hook.type === 'http' ||
+          h.hook.type === 'mcp_tool') &&
         (h.hook as { if?: string }).if,
     )
     const ifMatcher = hasIfCondition
@@ -1839,7 +1865,8 @@ export async function getMatchingHooks(
         h.hook.type !== 'command' &&
         h.hook.type !== 'prompt' &&
         h.hook.type !== 'agent' &&
-        h.hook.type !== 'http'
+        h.hook.type !== 'http' &&
+        h.hook.type !== 'mcp_tool'
       ) {
         return true
       }
@@ -2305,6 +2332,79 @@ async function* executeHooks({
         }
         yield agentResult
         cleanup?.()
+        return
+      }
+
+      if (hook.type === 'mcp_tool') {
+        emitHookStarted(hookId, hookName, hookEvent)
+        const { execMcpToolHook } = await import('./hooks/mcpToolHook.js')
+        const appStateForMcp = toolUseContext?.getAppState()
+        const mcpClients = appStateForMcp?.mcp.clients ?? []
+        const mcpResult = await execMcpToolHook(
+          hook,
+          {
+            tool_input: (jsonInput as { tool_input?: unknown }).tool_input,
+            tool_use_id: (jsonInput as { tool_use_id?: string }).tool_use_id,
+            tool_name: (jsonInput as { tool_name?: string }).tool_name,
+            session_id: (jsonInput as { session_id?: string }).session_id,
+            cwd: (jsonInput as { cwd?: string }).cwd,
+          },
+          mcpClients,
+          signal,
+        )
+        cleanup?.()
+        if (!mcpResult.ok) {
+          emitHookResponse({
+            hookId,
+            hookName,
+            hookEvent,
+            output: mcpResult.stderr ?? '',
+            stdout: '',
+            stderr: mcpResult.stderr ?? '',
+            exitCode: 1,
+            outcome: 'error',
+          })
+          yield {
+            message: createAttachmentMessage({
+              type: 'hook_non_blocking_error',
+              hookName,
+              toolUseID,
+              hookEvent,
+              stderr: mcpResult.stderr ?? '',
+              stdout: '',
+              exitCode: 1,
+            }),
+            outcome: 'non_blocking_error' as const,
+            hook,
+          }
+          return
+        }
+        emitHookResponse({
+          hookId,
+          hookName,
+          hookEvent,
+          output: mcpResult.output,
+          stdout: mcpResult.output,
+          stderr: '',
+          exitCode: 0,
+          outcome: 'success',
+        })
+        yield {
+          message: createAttachmentMessage({
+            type: 'hook_success',
+            content: mcpResult.output,
+            hookName,
+            toolUseID,
+            hookEvent,
+            stdout: mcpResult.output,
+            stderr: '',
+            exitCode: 0,
+            command: `${hook.server}.${hook.tool}`,
+            durationMs: mcpResult.durationMs,
+          }),
+          outcome: 'success' as const,
+          hook,
+        }
         return
       }
 
@@ -3207,6 +3307,21 @@ async function executeHooksOutsideREPL({
           command: 'function',
           succeeded: false,
           output: 'Internal error: function hook executed outside REPL context',
+          blocked: false,
+        }
+      }
+
+      // mcp_tool hooks: invoke a connected MCP server's tool directly.
+      // We need an app state to look up clients; outside-REPL mode usually
+      // does have one (passed via toolUseContext in non-stop hook paths,
+      // but this code path is for stop hooks which lack one). When absent,
+      // we degrade to a non-blocking error. Same shape as HTTP errors.
+      if (hook.type === 'mcp_tool') {
+        return {
+          command: `${hook.server}.${hook.tool}`,
+          succeeded: false,
+          output:
+            'mcp_tool hooks are only supported inside the REPL agent loop (no MCP client list available outside REPL stop hooks).',
           blocked: false,
         }
       }
@@ -5038,6 +5153,8 @@ function getHookDefinitionsForTelemetry(
       return { type: 'prompt', prompt: hook.prompt }
     } else if (hook.type === 'http') {
       return { type: 'http', command: hook.url }
+    } else if (hook.type === 'mcp_tool') {
+      return { type: 'mcp_tool', command: `${hook.server}.${hook.tool}` }
     } else if (hook.type === 'function') {
       return { type: 'function', name: 'function' }
     } else if (hook.type === 'callback') {

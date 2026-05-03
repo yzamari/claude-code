@@ -159,6 +159,22 @@ Local models (Gemma, Llama, Qwen, Mistral, DeepSeek, Phi) sometimes leak interna
 
 See [docs/multi-model-setup.md](docs/multi-model-setup.md) for full configuration guide.
 
+### Upstream Claude Code Parity (Feb–May 2026)
+
+This fork is caught up to upstream Claude Code v2.1.126. See [docs/upstream-catchup-2026-05.md](docs/upstream-catchup-2026-05.md) and [docs/upstream-catchup-2026-05-audit-supplement.md](docs/upstream-catchup-2026-05-audit-supplement.md) for the full inventory. Highlights you can use today:
+
+- **`/effort` slider** drives the multi-model router. `xhigh`/`max` forces the default (full-fat) model on every turn; `low` prefers `cheapModel` for non-complex tasks; explicit `/model` overrides still win.
+- **`ENABLE_PROMPT_CACHING_1H=1`** — universal 1-hour prompt cache TTL opt-in (any provider).
+- **New slash commands**: `/dream` (manual memory consolidation, public counterpart of KAIROS auto-dream), `/babysit-prs` (PR triage loop, pair with `/loop 5m /babysit-prs`), `/recap` (session summary).
+- **`mcp_tool` hook type** — hooks can now invoke a connected MCP server's tool directly with `${tool_input.x}`, `${tool_use_id}`, `${tool_name}`, `${session_id}`, `${cwd}` placeholder substitution. Example in [docs/upstream-catchup-2026-05.md](docs/upstream-catchup-2026-05.md).
+- **`updatedToolOutput` PostToolUse field** — works for any tool (not just MCP) so hooks can rewrite tool results across the board.
+- **Hardened Bash deny rules**: `Bash(watch:*)` / `Bash(ionice:*)` / `Bash(setsid:*)` / `Bash(taskset:*)` / `Bash(chrt:*)` no longer auto-suggested; `> /dev/tcp/host/port` and similar socket exfil paths now require explicit approval.
+- **Status-line stdin** includes `effort.level` + `thinking.enabled` so custom indicators can show them without re-deriving.
+- **Malformed-hook isolation** — one bad hook entry in `settings.json` no longer rejects the whole file.
+- **`context-1m-2025-08-07` beta** — gated correctly for Sonnet 4/4.5 retirement (Apr 30 2026).
+
+What's deliberately not ported: cloud-only features (`Auto Mode`, `Routines`, `Remote Control`, `Push notifications`, `Computer Use`, MCP hosted registry) need Anthropic-side services. Multi-day infra (native binary distribution, PowerShell tool, full IDE extension parity, voice improvements) is out of scope for the catch-up.
+
 ---
 
 ## 🔍 Explore with MCP Server

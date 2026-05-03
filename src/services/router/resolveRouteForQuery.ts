@@ -22,6 +22,7 @@ export function resolveModelForQuery(
     lastBashCommand?: string
     userPrompt?: string
     isToolFollowup?: boolean
+    effortHint?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   }
 ): ResolvedModelRoute {
   if (!routerConfig?.enabled) return { model: null, fallbackChain: [] }
@@ -42,6 +43,7 @@ export function resolveModelForQuery(
     bashCommand: context.lastBashCommand,
     userPrompt: context.userPrompt,
     isToolFollowup: context.isToolFollowup,
+    effortHint: context.effortHint,
   }
 
   const route = cachedRouter.resolve(taskContext)

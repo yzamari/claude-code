@@ -95,6 +95,7 @@ import type { QuerySource } from './constants/querySource.js'
 import { createDumpPromptsFetch } from './services/api/dumpPrompts.js'
 import { StreamingToolExecutor } from './services/tools/StreamingToolExecutor.js'
 import { resolveModelForQuery } from './services/router/resolveRouteForQuery.js'
+import { convertEffortValueToLevel } from './utils/effort.js'
 import { getModelCapabilities } from './services/router/capabilities.js'
 import { classifyTask } from './services/router/taskClassifier.js'
 import { queryCheckpoint } from './utils/queryProfiler.js'
@@ -641,6 +642,15 @@ async function* queryLoop(
     // model can handle reading tool output and deciding the next action.
     const isToolFollowup = lastToolNames.length > 0 && turnCount > 0
 
+    // Pass /effort slider value into the router so xhigh/max can force the
+    // default model and low can prefer cheapModel (see ModelRouter.resolve).
+    // appState.effortValue may be undefined (no slider set), a string level,
+    // or a numeric (ant-internal). convertEffortValueToLevel normalises it.
+    const effortHintForRouter =
+      appState.effortValue !== undefined
+        ? convertEffortValueToLevel(appState.effortValue)
+        : undefined
+
     const routeResult = isUserOverride
       ? { model: null, fallbackChain: [] } // User chose a specific model — skip routing entirely
       : resolveModelForQuery(routerSettings, {
@@ -652,6 +662,7 @@ async function* queryLoop(
           lastBashCommand,
           userPrompt: lastUserPrompt,
           isToolFollowup,
+          effortHint: effortHintForRouter,
         })
     const routedModel = routeResult.model
     const routerFallbackChain = routeResult.fallbackChain

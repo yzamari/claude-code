@@ -264,3 +264,101 @@ export function filterInvalidPermissionRules(
   return warnings
 }
 
+/**
+ * Filters malformed hook entries from raw parsed JSON data before schema
+ * validation. Upstream v2.1.118 parity — without this, ONE bad hook entry
+ * (e.g. `{ "type": "command" }` missing `command`, or a hook with a typo'd
+ * matcher) rejects the entire settings.json, breaking every other setting
+ * (theme, permissions, mcp config, …) for that user.
+ *
+ * Filter rules: a hook entry must be an object with a string `type` field
+ * matching one of the four supported types. Missing required fields per
+ * type (e.g. `command` for type:'command', `prompt` for type:'prompt') are
+ * also stripped. Anything else is left alone — the proper schema downstream
+ * does the strict per-field validation, but at least it gets to run.
+ */
+export function filterInvalidHooks(
+  data: unknown,
+  filePath: string,
+): ValidationError[] {
+  if (!data || typeof data !== 'object') return []
+  const obj = data as Record<string, unknown>
+  if (!obj.hooks || typeof obj.hooks !== 'object') return []
+  const hooksObj = obj.hooks as Record<string, unknown>
+
+  const warnings: ValidationError[] = []
+
+  for (const eventName of Object.keys(hooksObj)) {
+    const eventEntries = hooksObj[eventName]
+    if (!Array.isArray(eventEntries)) continue
+
+    hooksObj[eventName] = eventEntries
+      .map((matcherGroup, gIdx) => {
+        if (
+          !matcherGroup ||
+          typeof matcherGroup !== 'object' ||
+          Array.isArray(matcherGroup)
+        ) {
+          warnings.push({
+            file: filePath,
+            path: `hooks.${eventName}[${gIdx}]`,
+            message: `Hook matcher group must be an object — entry was removed`,
+            invalidValue: matcherGroup,
+          })
+          return null
+        }
+        const group = matcherGroup as Record<string, unknown>
+        if (!Array.isArray(group.hooks)) return group
+        group.hooks = group.hooks.filter((hook: unknown, hIdx: number) => {
+          if (!hook || typeof hook !== 'object') {
+            warnings.push({
+              file: filePath,
+              path: `hooks.${eventName}[${gIdx}].hooks[${hIdx}]`,
+              message: `Hook entry must be an object — entry was removed`,
+              invalidValue: hook,
+            })
+            return false
+          }
+          const h = hook as Record<string, unknown>
+          const type = h.type
+          if (
+            type !== 'command' &&
+            type !== 'prompt' &&
+            type !== 'agent' &&
+            type !== 'http'
+          ) {
+            warnings.push({
+              file: filePath,
+              path: `hooks.${eventName}[${gIdx}].hooks[${hIdx}]`,
+              message: `Hook type must be 'command' | 'prompt' | 'agent' | 'http' — entry was removed`,
+              invalidValue: hook,
+            })
+            return false
+          }
+          // Lightweight required-field check. Strict shape validation runs
+          // later via SettingsSchema; we only catch the "obvious typo"
+          // case here so the rest of settings.json survives.
+          if (
+            (type === 'command' && typeof h.command !== 'string') ||
+            (type === 'prompt' && typeof h.prompt !== 'string') ||
+            (type === 'agent' && typeof h.prompt !== 'string') ||
+            (type === 'http' && typeof h.url !== 'string')
+          ) {
+            warnings.push({
+              file: filePath,
+              path: `hooks.${eventName}[${gIdx}].hooks[${hIdx}]`,
+              message: `Hook of type '${type}' missing required field — entry was removed`,
+              invalidValue: hook,
+            })
+            return false
+          }
+          return true
+        })
+        return group
+      })
+      .filter(g => g !== null)
+  }
+
+  return warnings
+}
+

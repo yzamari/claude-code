@@ -102,7 +102,11 @@ export const syncHookResponseSchema = lazySchema(() =>
           additionalContext: z.string().optional(),
           updatedMCPToolOutput: z
             .unknown()
-            .describe('Updates the output for MCP tools')
+            .describe('Updates the output for MCP tools (deprecated: use updatedToolOutput)')
+            .optional(),
+          updatedToolOutput: z
+            .unknown()
+            .describe('Replaces the tool result delivered to the model. Works for any tool (not just MCP). Upstream v2.1.121 parity. When both are set, updatedToolOutput wins.')
             .optional(),
         }),
         z.object({
@@ -270,6 +274,8 @@ export type HookResult = {
   initialUserMessage?: string
   updatedInput?: Record<string, unknown>
   updatedMCPToolOutput?: unknown
+  /** Upstream v2.1.121 parity — replaces tool output for any tool (not just MCP). */
+  updatedToolOutput?: unknown
   permissionRequestResult?: PermissionRequestResult
   retry?: boolean
 }
@@ -285,6 +291,8 @@ export type AggregatedHookResult = {
   initialUserMessage?: string
   updatedInput?: Record<string, unknown>
   updatedMCPToolOutput?: unknown
+  /** Upstream v2.1.121 parity — replaces tool output for any tool (not just MCP). */
+  updatedToolOutput?: unknown
   permissionRequestResult?: PermissionRequestResult
   retry?: boolean
 }

@@ -348,6 +348,8 @@ export interface HookResult {
   initialUserMessage?: string
   updatedInput?: Record<string, unknown>
   updatedMCPToolOutput?: unknown
+  /** Upstream v2.1.121 parity — replaces tool output for any tool (not just MCP). */
+  updatedToolOutput?: unknown
   permissionRequestResult?: PermissionRequestResult
   elicitationResponse?: ElicitationResponse
   watchPaths?: string[]
@@ -368,6 +370,8 @@ export type AggregatedHookResult = {
   initialUserMessage?: string
   updatedInput?: Record<string, unknown>
   updatedMCPToolOutput?: unknown
+  /** Upstream v2.1.121 parity — replaces tool output for any tool (not just MCP). */
+  updatedToolOutput?: unknown
   permissionRequestResult?: PermissionRequestResult
   watchPaths?: string[]
   elicitationResponse?: ElicitationResponse
@@ -642,8 +646,19 @@ function processHookJSONOutput({
         break
       case 'PostToolUse':
         result.additionalContext = json.hookSpecificOutput.additionalContext
-        // Extract updatedMCPToolOutput if provided
-        if (json.hookSpecificOutput.updatedMCPToolOutput) {
+        // Extract updatedToolOutput (v2.1.121 — works for ANY tool) and the
+        // legacy updatedMCPToolOutput (MCP-only). updatedToolOutput wins when
+        // both are set so authors migrating to the new field have predictable
+        // behavior.
+        if (
+          (json.hookSpecificOutput as { updatedToolOutput?: unknown })
+            .updatedToolOutput !== undefined
+        ) {
+          result.updatedToolOutput = (
+            json.hookSpecificOutput as { updatedToolOutput?: unknown }
+          ).updatedToolOutput
+        }
+        if (json.hookSpecificOutput.updatedMCPToolOutput !== undefined) {
           result.updatedMCPToolOutput =
             json.hookSpecificOutput.updatedMCPToolOutput
         }
@@ -2807,8 +2822,19 @@ async function* executeHooks({
       }
     }
 
-    // Yield updatedMCPToolOutput if provided (from PostToolUse hooks)
-    if (result.updatedMCPToolOutput) {
+    // Yield updatedToolOutput (v2.1.121, all tools) if provided. Yield
+    // updatedMCPToolOutput too for backward compat. updatedToolOutput wins
+    // when both are set (the consumer should prefer it; legacy MCP-only
+    // consumers still see updatedMCPToolOutput unchanged).
+    if (result.updatedToolOutput !== undefined) {
+      logForDebugging(
+        `Hook ${hookEvent} (${getHookDisplayText(result.hook)}) replaced tool output`,
+      )
+      yield {
+        updatedToolOutput: result.updatedToolOutput,
+      }
+    }
+    if (result.updatedMCPToolOutput !== undefined) {
       logForDebugging(
         `Hook ${hookEvent} (${getHookDisplayText(result.hook)}) replaced MCP tool output`,
       )

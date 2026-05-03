@@ -81,6 +81,16 @@ function injectAfter(needle, addition, label, sentinel) {
 }
 
 for (const m of NEW_MODELS) {
+  // 0. var declaration — the IIFE has a single hoisted `var X, Y, Z;` line
+  //    that must list every constant assigned inside. Without this, the
+  //    assignment becomes an implicit-global ReferenceError under strict mode.
+  injectAfter(
+    `, CLAUDE_OPUS_4_6_CONFIG`,
+    `, ${m.constName}`,
+    `var declaration for ${m.constName}`,
+    `, ${m.constName}`
+  );
+
   // 1. CONFIG constant + ALL_MODEL_CONFIGS entry
   // Anchor: end of CLAUDE_OPUS_4_6_CONFIG block, just before CLAUDE_SONNET_4_6_CONFIG
   injectAfter(

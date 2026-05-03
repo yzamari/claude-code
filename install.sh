@@ -204,6 +204,19 @@ echo "→ Building Claude Code..."
 npm run build 2>&1 | tail -1
 echo "✓ Build complete"
 
+# ── Step 8b: Patch newer Claude model IDs into bundled CLI ────────────
+# The bundled dist/cli.mjs has a hardcoded model registry frozen at the
+# upstream snapshot. Inject newer IDs (Opus 4.7, etc.) so they resolve
+# with correct pricing/display. Idempotent — safe to re-run.
+
+echo ""
+echo "── Step 8b: Patch model registry ──"
+if [ -f dist/cli.mjs ] && [ -f scripts/patch-models.mjs ]; then
+  node scripts/patch-models.mjs || echo "⚠  Model patch failed (non-fatal)"
+else
+  echo "→ skipped (dist/cli.mjs or patcher missing)"
+fi
+
 # ── Step 9: Make scripts executable ───────────────────────────────────
 
 chmod +x run.sh setup-heretic.sh 2>/dev/null

@@ -1,5 +1,6 @@
 #!/bin/bash
 # Claude Code Multi-Model Router
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # Usage:
 #   ./run.sh                                    # Smart routing (Gemini + Claude + Local)
 #   ./run.sh heretic                            # Uncensored local (llama.cpp Metal, fast)
@@ -42,7 +43,8 @@ case "$MODEL_ALIAS" in
   heretic-mlx|fast-heretic) MODEL="tq/TheCluster/Qwen3.5-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-MLX-mxfp4" ;;
   tq|turboquant)          MODEL="tq/mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit" ;;
   qwen-opus|opus-distill) MODEL="tq/mlx-community/Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit" ;;
-  claude|opus)            MODEL="claude-opus-4-6" ;;
+  claude|opus|opus-4-7)   MODEL="claude-opus-4-7" ;;
+  opus-4-6)               MODEL="claude-opus-4-6" ;;
   sonnet)                 MODEL="claude-sonnet-4-6" ;;
   haiku)                  MODEL="claude-haiku-4-5-20251001" ;;
   smart)                  MODEL="gemini/gemini-3.1-pro-preview" ;;
@@ -169,7 +171,7 @@ export CLAUDE_CODE_SKIP_VERSION_CHECK=1
 export ANTHROPIC_MODEL="$MODEL"
 
 if [ -n "$PROMPT" ]; then
-  exec bun dist/cli.mjs --bare --print --dangerously-skip-permissions --settings "$SETTINGS" "$PROMPT" "${EXTRA_ARGS[@]}"
+  exec bun "$SCRIPT_DIR/dist/cli.mjs" --bare --print --dangerously-skip-permissions --settings "$SETTINGS" "$PROMPT" "${EXTRA_ARGS[@]}"
 else
   echo "╭──────────────────────────────────────────────────╮"
   echo "│  Claude Code Multi-Model Router                  │"
@@ -194,5 +196,5 @@ else
   echo "│  /model to switch manually                       │"
   echo "╰──────────────────────────────────────────────────╯"
   echo ""
-  exec bun dist/cli.mjs --dangerously-skip-permissions --settings "$SETTINGS" "${EXTRA_ARGS[@]}"
+  exec bun "$SCRIPT_DIR/dist/cli.mjs" --dangerously-skip-permissions --settings "$SETTINGS" "${EXTRA_ARGS[@]}"
 fi

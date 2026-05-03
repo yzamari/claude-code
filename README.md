@@ -118,7 +118,8 @@ chmod +x install.sh
 | `./run.sh smart` | Multi-model routing | Both | Routes each task to the best model |
 | `./run.sh heretic` | gemma4-heretic | Local | Uncensored, llama.cpp Metal, 128K context |
 | `./run.sh heretic-mlx` | Qwen3.5-40B heretic | Local | Uncensored, MLX native, fastest |
-| `./run.sh claude` | Claude Opus 4.6 | Cloud | Best quality, needs API key |
+| `./run.sh claude` | Claude Opus 4.7 | Cloud | Latest flagship · 1M context · needs API key |
+| `./run.sh opus-4-6` | Claude Opus 4.6 | Cloud | Previous flagship (still supported) |
 | `./run.sh gemini` | Gemini 3.1 Pro | Cloud | 2M context, needs API key |
 | `./run.sh sonnet` | Claude Sonnet 4.6 | Cloud | Fast + cheap |
 | `./run.sh ollama` | DeepSeek Coder v2 | Local | Via Ollama |
@@ -174,6 +175,20 @@ This fork is caught up to upstream Claude Code v2.1.126. See [docs/upstream-catc
 - **`context-1m-2025-08-07` beta** — gated correctly for Sonnet 4/4.5 retirement (Apr 30 2026).
 
 What's deliberately not ported: cloud-only features (`Auto Mode`, `Routines`, `Remote Control`, `Push notifications`, `Computer Use`, MCP hosted registry) need Anthropic-side services. Multi-day infra (native binary distribution, PowerShell tool, full IDE extension parity, voice improvements) is out of scope for the catch-up.
+
+### Newer Claude Models (post-snapshot)
+
+The bundled `dist/cli.mjs` has a hardcoded model registry frozen at the upstream snapshot. To use Claude IDs that postdate the bundle (e.g. `claude-opus-4-7`, released 2026-04-16), `install.sh` runs `scripts/patch-models.mjs` automatically — you don't need to do anything.
+
+To re-apply manually after a rebuild, or to verify state:
+
+```bash
+node scripts/patch-models.mjs           # patch (idempotent)
+node scripts/patch-models.mjs --check   # verify already patched
+node scripts/patch-models.mjs --restore # roll back to dist/cli.mjs.bak
+```
+
+Add new model IDs by appending to the `NEW_MODELS` array at the top of the script. Picker static entry isn't patched — set `ANTHROPIC_CUSTOM_MODEL_OPTION=claude-opus-4-7` (built-in env-var escape hatch) if you want it always visible in `/model`.
 
 ---
 

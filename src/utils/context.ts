@@ -40,12 +40,44 @@ export function has1mContext(model: string): boolean {
 }
 
 // @[MODEL LAUNCH]: Update this pattern if the new model supports 1M context
+//
+// As of 2026-04-30 the `context-1m-2025-08-07` beta header is RETIRED for
+// Sonnet 4 / 4.5 (they no longer accept it). Sonnet 4.6 and Opus 4.6+ ship
+// 1M natively — no header needed. So this function now returns true ONLY
+// for legacy callsites that still gate model-capability lookups; the gate
+// in betas.ts that pushes the header is now also guarded by isAfterApr30
+// to avoid silently sending a dead header.
 export function modelSupports1M(model: string): boolean {
   if (is1mContextDisabled()) {
     return false
   }
   const canonical = getCanonicalName(model)
   return canonical.includes('claude-sonnet-4') || canonical.includes('opus-4-6')
+}
+
+/**
+ * Returns true when the `context-1m-2025-08-07` beta header is still
+ * accepted for the given model. Anthropic retired the beta on Sonnet 4/4.5
+ * on 2026-04-30; Sonnet 4.6 and Opus 4.6+ accept 1M natively without a
+ * header. Sending the header on a retired model is a no-op at best and a
+ * 400 at worst — definitely not what we want.
+ */
+export function modelStillAcceptsContext1MBeta(model: string): boolean {
+  if (is1mContextDisabled()) return false
+  const canonical = getCanonicalName(model)
+  // Retired for Sonnet 4 and 4.5
+  if (canonical.includes('claude-sonnet-4-5')) return false
+  if (
+    canonical.includes('claude-sonnet-4') &&
+    !canonical.includes('claude-sonnet-4-6') &&
+    !canonical.includes('claude-sonnet-4-7')
+  ) {
+    // Sonnet 4.0 — also retired
+    return false
+  }
+  // Sonnet 4.6 / Opus 4.6+ have 1M natively, header is unnecessary (no-op)
+  // but not rejected. Keep returning true so existing flow unchanged for them.
+  return canonical.includes('claude-sonnet-4-6') || canonical.includes('opus-4-6')
 }
 
 export function getContextWindowForModel(

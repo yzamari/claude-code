@@ -19,6 +19,7 @@ import { checkHasTrustDialogAccepted } from '../utils/config.js';
 import { calculateContextPercentages, getContextWindowForModel } from '../utils/context.js';
 import { getCwd } from '../utils/cwd.js';
 import { logForDebugging } from '../utils/debug.js';
+import { getDisplayedEffortLevel } from '../utils/effort.js';
 import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
 import { createBaseHookInput, executeStatusLineCommand } from '../utils/hooks.js';
 import { getLastAssistantMessage } from '../utils/messages.js';
@@ -48,6 +49,9 @@ function buildStatusLineCommandInput(permissionMode: PermissionMode, exceeds200k
   const sessionId = getSessionId();
   const sessionName = getCurrentSessionTitle(sessionId);
   const rawUtil = getRawUtilization();
+  const appStateForEffort = (settings as unknown as { effortValue?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | number })?.effortValue;
+  const effortLevel = getDisplayedEffortLevel(runtimeModel, appStateForEffort);
+  const thinkingEnabled = (settings as unknown as { thinkingEnabled?: boolean })?.thinkingEnabled ?? false;
   const rateLimits: StatusLineCommandInput['rate_limits'] = {
     ...(rawUtil.five_hour && {
       five_hour: {
@@ -96,6 +100,15 @@ function buildStatusLineCommandInput(permissionMode: PermissionMode, exceeds200k
       remaining_percentage: contextPercentages.remaining
     },
     exceeds_200k_tokens: exceeds200kTokens,
+    // Upstream parity: expose effort + thinking to status-line scripts so
+    // custom indicators can show "xhigh", "thinking on", etc. without
+    // re-deriving them from `model`.
+    effort: {
+      level: effortLevel
+    },
+    thinking: {
+      enabled: thinkingEnabled
+    },
     ...((rateLimits.five_hour || rateLimits.seven_day) && {
       rate_limits: rateLimits
     }),

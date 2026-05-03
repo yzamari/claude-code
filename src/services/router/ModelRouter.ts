@@ -68,6 +68,28 @@ export class ModelRouter {
       return this.resolveModelSpec(context.userModelOverride, taskType, fallbackChain)
     }
 
+    // /effort=xhigh|max: force the default (full-fat) model on every turn,
+    // overriding per-task routes. Users dialling effort up are explicitly
+    // saying "spend more, pick the strongest model" — honouring a cheap
+    // route would silently undermine that.
+    if (context.effortHint === 'xhigh' || context.effortHint === 'max') {
+      return this.resolveDefault(taskType, fallbackChain)
+    }
+
+    // /effort=low: prefer cheapModel for any task type that doesn't have an
+    // explicit route, not just tool_followup. Users dialling effort down
+    // accept lower quality on light tasks to extend quota.
+    if (
+      context.effortHint === 'low' &&
+      this.config.cheapModel &&
+      !this.routeMap.has(taskType) &&
+      taskType !== 'complex_reasoning' &&
+      taskType !== 'planning' &&
+      taskType !== 'large_context'
+    ) {
+      return this.resolveModelSpec(this.config.cheapModel, taskType, fallbackChain)
+    }
+
     // Tool follow-up: use cheapModel if configured and no explicit route
     if (taskType === 'tool_followup' && this.config.cheapModel && !this.routeMap.has(taskType)) {
       return this.resolveModelSpec(this.config.cheapModel, taskType, fallbackChain)

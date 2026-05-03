@@ -10,6 +10,15 @@ export interface TaskContext {
   userPrompt?: string
   /** True when the previous turn produced tool results (follow-up processing turn). */
   isToolFollowup?: boolean
+  /**
+   * Resolved /effort slider level. Lets the router push cheap turns onto
+   * `cheapModel` when the user explicitly dialled effort down ('low'), or
+   * force the default (full-fat) model on every turn when they dialled it
+   * up ('xhigh' / 'max'). Honoured by ModelRouter.resolve() — see it for the
+   * exact precedence (user_override > effort=max/xhigh > effort=low cheap
+   * preference > per-task routes > default).
+   */
+  effortHint?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 }
 
 const SEARCH_TOOLS = new Set(['Grep', 'Glob'])

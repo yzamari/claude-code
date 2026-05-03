@@ -391,6 +391,13 @@ export function getCacheControl({
  * TTLs when GrowthBook's disk cache updates mid-request.
  */
 function should1hCacheTTL(querySource?: QuerySource): boolean {
+  // Universal opt-in (matches upstream v2.1.108): any provider, any user type.
+  // Why: lets API-key / Vertex / Foundry / self-hosted users opt into 1h TTL
+  // without depending on GrowthBook (which only fires for first-party users).
+  if (isEnvTruthy(process.env.ENABLE_PROMPT_CACHING_1H)) {
+    return true
+  }
+
   // 3P Bedrock users get 1h TTL when opted in via env var — they manage their own billing
   // No GrowthBook gating needed since 3P users don't have GrowthBook configured
   if (
